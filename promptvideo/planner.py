@@ -143,7 +143,7 @@ def year_events(text, n=6):
         if len(rest) < 12:
             continue
         seen.add(m.group(1))
-        out.append({"year": m.group(1), "text": _short(rest[0].upper() + rest[1:], 50)})
+        out.append({"year": m.group(1), "text": _short(("İ" if rest[0] == "i" else rest[0].upper()) + rest[1:], 50)})
     out.sort(key=lambda e: int(e["year"]))
     if len(out) > n:  # baştan sona yayılan n olay seç
         idx = sorted({round(i * (len(out) - 1) / (n - 1)) for i in range(n)})
@@ -165,6 +165,9 @@ def plan_fallback(prompt, findings, lang="tr", log=print):
     scenes = []
     wiki = next((f for f in sel if f["kind"] == "wiki"), None)
     title = wiki["title"] if wiki else R.topic_of(prompt)[:60]
+    if not wiki:  # Vikipedi yoksa kullanıcının kendi metni anlatının temeli olur
+        wiki = next((f for f in sel if f["kind"] == "user" and len(f["text"]) > 200
+                     and not (f.get("series") or f.get("latest"))), None)
     sents = _sentences(wiki["text"], 5) if wiki else []
     scenes.append({"type": "title", "title": title, "subtitle": _short(sents[0], 110) if sents else "",
                    "narration": sents[0] if sents else title})
@@ -213,17 +216,19 @@ def plan_fallback(prompt, findings, lang="tr", log=print):
                                "source": f["source"],
                                "narration": f"{y0} ile {y1} arasında {label.lower()} {_fmt(v0, unit)} "
                                             f"düzeyinden {_fmt(v1, unit)} düzeyine geldi."})
-            if unit == "%" and 0 < v1 <= 100:
+            if unit == "%" and 0 < v1 <= 100 and f["kind"] != "user":  # kendi verinde oran kişi sayısı olmayabilir
                 scenes.append({"type": "people", "kicker": name, "title": label, "value": round(v1, 1), "total": 100,
                                "label": f"Her 100 kişiden yaklaşık {round(v1)} tanesi.", "source": f["source"],
                                "narration": f"Yani her 100 kişiden yaklaşık {round(v1)} tanesi."})
         wm = f.get("world")
         if wm:
-            top = wm["rows"][0]
-            scenes.append({"type": "map", "map": "world", "kicker": "Dünya", "title": wm["label"], "unit": wm["unit"],
+            top = max(wm["rows"], key=lambda r: r[2])
+            mk = wm.get("map", "world")
+            scenes.append({"type": "map", "map": mk, "kicker": "Türkiye" if mk == "turkey" else "Dünya",
+                           "title": wm["label"], "unit": wm["unit"],
                            "data": [{"label": n, "value": v} for n, _, v in wm["rows"]], "presenter": True,
                            "source": f["source"],
-                           "narration": f"Dünya haritasında {wm['label'].lower()} en yüksek {top[0]} ülkesinde: "
+                           "narration": f"Haritada {wm['label'].lower()} en yüksek {top[0]}: "
                                         f"{_fmt(top[2], wm['unit'])}."})
         la = f.get("latest")
         if la and len(la["rows"]) > 2:
@@ -235,13 +240,14 @@ def plan_fallback(prompt, findings, lang="tr", log=print):
                                "left": {"label": hi[0], "value": hi[2]}, "right": {"label": other[0], "value": other[2]},
                                "source": f["source"],
                                "narration": f"{hi[0]}: {_fmt(hi[2], unit)}. {other[0]}: {_fmt(other[2], unit)}."})
-            scenes.append({"type": "bar", "kicker": "Karşılaştırma", "title": f"{label}: ülkeler", "unit": unit,
+            scenes.append({"type": "bar", "kicker": "Karşılaştırma", "title": label if la.get("name_col") else f"{label}: ülkeler", "unit": unit,
                            "highlight": la.get("highlight"), "source": f["source"],
                            "data": [{"label": n, "value": v} for n, _, v in rows],
                            "narration": "Diğer ülkelerle karşılaştırıldığında tablo böyle görünüyor."})
             scenes.append({"type": "table", "kicker": "Veri tablosu", "title": label, "source": f["source"],
-                           "columns": ["Ülke", "Yıl", label],
-                           "rows": [[n, str(y), _fmt(v, unit)] for n, y, v in sorted(rows, key=lambda r: -r[2])],
+                           "columns": [la.get("name_col", "Ülke")] + (["Yıl"] if rows[0][1] else []) + [label],
+                           "rows": [[n] + ([str(y)] if y else []) + [_fmt(v, unit)]
+                                    for n, y, v in sorted(rows, key=lambda r: -r[2])][:8],
                            "narration": "Ayrıntılı rakamlar tabloda."})
     scenes.append({"type": "outro", "title": "İzlediğiniz için teşekkürler", "sources": R.sources(findings),
                    "narration": "Kaynaklar ekranda. İzlediğiniz için teşekkürler."})

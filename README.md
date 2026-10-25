@@ -26,11 +26,19 @@ Uygulamada:
 - **Altyazı**: "Videoya yaz" seçiliyse anlatım, konuşmayla eşzamanlı olarak alt şeritte görünür. Ayrı `altyazi.srt` dosyası her zaman oluşur.
 - **1 · Araştır**: Wikipedia, Wikidata, Dünya Bankası, Our World in Data, IMF ve web aramasından bilgi toplar.
   **Araştırma** sekmesinde her bilgiyi kaynağıyla görürsünüz; istemediklerinizin işaretini kaldırın.
+- **Kendi kaynağın**: Araştırma sekmesindeki **＋ Dosya ekle** ile PDF, Excel (xlsx), CSV ya da metin
+  dosyası; **＋ Web adresi ekle** ile bir sayfa (içindeki tablolar dahil) eklenir. Yıl sütunu olan tablolar
+  çizgi grafiğe ve önce/sonra sahnesine, ad + sayı tabloları çubuk grafiğe, il ya da ülke listeleri haritaya
+  dönüşür. Araştırma yapmadan sadece kendi kaynaklarınla da video yapabilirsin.
 - **2 · Senaryoyu yaz**: yalnızca işaretli bilgilerden sahneleri yazar. Ardından **doğruluk kontrolü**
   senaryodaki her sayıyı kaynaklarda arar: bulunanlar ✓, bulunamayanlar ⚠ ile işaretlenir.
 - **Senaryo** sekmesi: sahneleri ekleyin, silin, sıralayın; başlık, anlatım ve verileri düzeltin,
   "Önizle" ile anında görün.
-- **3 · Videoyu oluştur**: çizim sırasında kareler canlı önizlenir; bitince "Videoyu aç".
+- **Arka plan müziği**: Yok, programın ürettiği telifsiz müzik (sakin / enerjik / gizemli) ya da kendi dosyan.
+  Müzik konuşma sırasında otomatik kısılır. **Ses efektleri** (whoosh, pop, tık, ding) animasyonlara denk gelir.
+- **Dikey sürüm**: "Oluştur" seçiliyse ayrıca 1080x1920 `video_dikey.mp4` (Shorts / Reels / TikTok) çıkar.
+- **3 · Videoyu oluştur**: çizim sırasında kareler canlı önizlenir; bitince "Videoyu aç". Video klasöründe
+  ayrıca `kapak.png` (YouTube kapak resmi) ve `youtube.txt` (başlık, açıklama, bölümler, kaynaklar, etiketler) olur.
 - **Videolarım**: önceki videolar; eski bir senaryoyu açıp yeniden çizebilirsiniz.
 
 ## Komut satırı
@@ -73,7 +81,9 @@ titreyen çizgiler, doodle'lar, el yazısı notlar) ve `--style modern` (koyu, p
 ```
 python -m promptvideo "İstanbul'un en kalabalık ilçeleri"
 python -m promptvideo "Avrupa'da enflasyon: Türkiye, Almanya, Fransa" --voice tr-TR-EmelNeural
-python -m promptvideo "..." --music muzik.mp3        # arka plan müziği (telifsiz bir parça)
+python -m promptvideo "..." --music muzik.mp3        # kendi müziğin
+python -m promptvideo "..." --music auto:enerjik     # programın ürettiği telifsiz müzik (sakin/enerjik/gizemli)
+python -m promptvideo "..." --vertical --no-sfx     # dikey sürüm de üret, ses efektsiz
 python -m promptvideo "..." --plan-only               # sadece plan.json üret
 python -m promptvideo --plan cikti/plan.json          # planı elle düzeltip yeniden çiz
 python -m promptvideo --plan ornekler/demo_plan.json  # internetsiz demo
@@ -88,7 +98,9 @@ kontrol edin, sonra `--plan` ile çizin. Planı elle yazmak da mümkün.
 
 `title`, `bullets`, `stat`, `bar`, `line` (birden çok seri olabilir), `pie`, `table`,
 `image` (`image_query` / `image_url` / `image_path`), `video` (`stock_query` / `video_path`),
-`outro`. Alanların tam örneği `promptvideo/planner.py` içindeki `SCHEMA`'da ve
+`character` (çizgi karakterler konuşur; her karakterin kendi sesi, `backdrop`: studio, city, office, space,
+lab, nature), `versus`, `people` (piktogram), `map` (`world` ya da `turkey`), `timeline` (yıllara göre olaylar),
+`compare` (önce / sonra), `outro`. Alanların tam örneği `promptvideo/planner.py` içindeki `SCHEMA`'da ve
 `ornekler/demo_plan.json`'da.
 
 ## Ayarlar (ortam değişkenleri)

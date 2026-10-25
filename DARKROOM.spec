@@ -6,7 +6,8 @@ datas = [("promptvideo/fonts", "promptvideo/fonts"), ("promptvideo/assets", "pro
 datas += collect_data_files("imageio_ffmpeg")
 datas += collect_data_files("edge_tts")
 binaries = collect_dynamic_libs("cairo") + collect_dynamic_libs("imageio_ffmpeg")
-hidden = collect_submodules("edge_tts") + collect_submodules("ddgs") + ["lxml.etree", "gtts"]
+hidden = (collect_submodules("edge_tts") + collect_submodules("ddgs") + collect_submodules("openpyxl")
+          + collect_submodules("pypdf") + ["lxml.etree", "gtts"])
 
 a = Analysis(["baslat.py"], pathex=["."], binaries=binaries, datas=datas, hiddenimports=hidden,
              excludes=["tkinter", "matplotlib", "PySide6.QtWebEngineCore", "PySide6.Qt3DCore"])

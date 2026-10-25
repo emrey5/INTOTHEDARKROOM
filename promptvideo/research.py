@@ -10,7 +10,8 @@ import re
 from . import webdata as W
 
 KINDS = {"wiki": "WIKIPEDIA", "table": "WIKI TABLO", "wikidata": "WIKIDATA", "worldbank": "DÜNYA BANKASI",
-         "owid": "OUR WORLD IN DATA", "imf": "IMF", "search": "ARAMA", "web": "WEB SAYFASI"}
+         "owid": "OUR WORLD IN DATA", "imf": "IMF", "search": "ARAMA", "web": "WEB SAYFASI",
+         "user": "SENİN KAYNAĞIN"}
 
 
 def topic_of(prompt):

@@ -16,9 +16,9 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QLabel,
     QPlainTextEdit, QPushButton, QComboBox, QLineEdit, QFileDialog, QProgressBar, QTabWidget,
     QListWidget, QListWidgetItem, QFrame, QMessageBox, QSplitter, QSizePolicy, QCheckBox,
-    QFormLayout, QDoubleSpinBox, QToolButton, QScrollArea, QButtonGroup)
+    QFormLayout, QDoubleSpinBox, QToolButton, QScrollArea, QButtonGroup, QInputDialog)
 
-from . import theme, pipeline, planner, scenes, updater, __version__
+from . import theme, pipeline, planner, scenes, updater, userdata, __version__
 from . import draw as D
 from .render import render_frame
 
@@ -283,6 +283,22 @@ class Worker(QThread):
             self.failed.emit(str(e))
         finally:
             sys.stdout = old
+
+
+class SourceLoader(QThread):
+    """Kullanıcının dosyasını ya da web adresini arka planda okur."""
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, path=None, url=None):
+        super().__init__()
+        self.path, self.url = path, url
+
+    def run(self):
+        try:
+            self.done.emit(userdata.from_file(self.path) if self.path else userdata.from_url(self.url))
+        except Exception as e:
+            self.failed.emit(str(e) or e.__class__.__name__)
 
 
 class UpdateCheck(QThread):
@@ -630,7 +646,8 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(0, 16, 0, 0)
         v.setSpacing(10)
         self.research_info = QLabel("Araştırma sonuçları burada görünecek. Senaryo yalnızca işaretli bilgilerden "
-                                    "yazılır ve senaryodaki sayılar bunlarla doğrulanır.", objectName="status")
+                                    "yazılır ve senaryodaki sayılar bunlarla doğrulanır. Kendi PDF, Excel ya da web "
+                                    "kaynağını da aşağıdaki “＋” düğmeleriyle ekleyebilirsin.", objectName="status")
         self.research_info.setWordWrap(True)
         v.addWidget(self.research_info)
         h = QHBoxLayout()
@@ -653,6 +670,16 @@ class MainWindow(QMainWindow):
         self.btn_source = QPushButton("Kaynağı aç")
         self.btn_source.clicked.connect(self.open_finding_source)
         hb.addWidget(self.btn_source)
+        hb.addSpacing(18)
+        self.btn_add_file = QPushButton("＋ Dosya ekle")
+        self.btn_add_file.setToolTip("Kendi kaynağın: PDF, Excel (xlsx), CSV ya da metin dosyası.\n"
+                                     "Tablolar otomatik grafiğe, il/ülke listeleri haritaya dönüşür.")
+        self.btn_add_file.clicked.connect(self.add_source_file)
+        hb.addWidget(self.btn_add_file)
+        self.btn_add_url = QPushButton("＋ Web adresi ekle")
+        self.btn_add_url.setToolTip("Bir sayfanın metnini ve içindeki tabloları kaynak olarak ekler.")
+        self.btn_add_url.clicked.connect(self.add_source_url)
+        hb.addWidget(self.btn_add_url)
         hb.addStretch(1)
         self.btn_write = QPushButton("02 ▸ SEÇİLENLERLE SENARYOYU YAZ", objectName="primary")
         self.btn_write.clicked.connect(self.start_plan)
@@ -660,6 +687,55 @@ class MainWindow(QMainWindow):
         hb.addWidget(self.btn_write)
         v.addLayout(hb)
         return w
+
+    def add_source_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Kaynak dosyası seç", os.path.expanduser("~"),
+                                              "Kaynaklar (*.pdf *.xlsx *.xlsm *.xls *.csv *.tsv *.txt *.md);;"
+                                              "Tüm dosyalar (*)")
+        if path:
+            self._load_source(SourceLoader(path=path), os.path.basename(path))
+
+    def add_source_url(self):
+        url, ok = QInputDialog.getText(self, "Web adresi ekle", "Sayfa, PDF ya da CSV adresi:")
+        if ok and url.strip():
+            self._load_source(SourceLoader(url=url.strip()), url.strip())
+
+    def _load_source(self, loader, name):
+        self.status.setText(f"Kaynak okunuyor: {name}…")
+        self.btn_add_file.setEnabled(False)
+        self.btn_add_url.setEnabled(False)
+        self.loader = loader
+        loader.done.connect(self.on_source_loaded)
+        loader.failed.connect(lambda e: (QMessageBox.warning(self, APP_NAME, f"Kaynak okunamadı:\n{e}"),
+                                         self._source_idle()))
+        loader.start()
+
+    def _source_idle(self):
+        self.btn_add_file.setEnabled(True)
+        self.btn_add_url.setEnabled(True)
+        self.status.setText("")
+
+    def on_source_loaded(self, new):
+        self._source_idle()
+        if self.findings is None:
+            self.findings = []
+        if not getattr(self, "plan_dir", None):
+            prompt = self.prompt.toPlainText().strip() or "kendi kaynaklarim"
+            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+            self.plan_dir = os.path.join(self.outdir.text(), f"{stamp}-{slugify(prompt)}")
+        self.sync_findings()
+        n = len(self.findings)
+        for i, f in enumerate(new):
+            f["id"] = f"u{n + i + 1}"
+        self.findings += new
+        os.makedirs(self.plan_dir, exist_ok=True)
+        pipeline.save_findings(self.findings, self.plan_dir)
+        self.populate_findings()
+        self.finding_list.setCurrentRow(len(self.findings) - 1)
+        self.set_busy(False)
+        kinds = ", ".join("grafik" if f.get("series") else "tablo" if f.get("latest") else "metin" for f in new)
+        self.status.setText(f"{len(new)} kaynak eklendi ({kinds}). Senaryo yazılırken kullanılacak.")
+        self.tabs.setCurrentIndex(1)
 
     def populate_findings(self):
         self.finding_list.blockSignals(True)
@@ -914,7 +990,10 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def on_researched(self, findings):
-        self.findings = findings
+        mine = [f for f in self.findings or [] if f.get("kind") == "user"]  # eklenen kendi kaynakların kalır
+        self.findings = findings + mine
+        if mine:
+            pipeline.save_findings(self.findings, self.plan_dir)
         self.set_busy(False)
         self.populate_findings()
         self.bar.setValue(1000)

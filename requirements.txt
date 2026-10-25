@@ -8,3 +8,5 @@ gTTS>=2.5
 ddgs>=9.0
 PySide6-Essentials>=6.6
 imageio-ffmpeg>=0.5
+pypdf>=4.0
+openpyxl>=3.1
