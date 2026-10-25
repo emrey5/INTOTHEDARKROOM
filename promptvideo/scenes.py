@@ -674,9 +674,15 @@ def draw_character_scene(ctx, sc, t, dur):
     chars = _chars(sc)
     lines = _say_lines(sc)
     n = len(lines)
-    span = max(0.5, dur - 1.0)
-    cur = min(n - 1, int(clamp((t - 0.4) / span) * n)) if n else -1
-    line_start = 0.4 + cur * span / max(1, n)
+    times = sc.get("_line_times")
+    if times and len(times) == n:  # seslendirme varsa balon konuşmayla eşzamanlı değişir
+        cur = max([k for k, (a, _) in enumerate(times) if t >= a - 0.05] or [0])
+        line_start, line_end = times[cur]
+    else:
+        span = max(0.5, dur - 1.0)
+        cur = min(n - 1, int(clamp((t - 0.4) / span) * n)) if n else -1
+        line_start = 0.4 + cur * span / max(1, n)
+        line_end = line_start + span / max(1, n) - 0.2
     two = len(chars) > 1
     xs = (430, 1490) if two else (470,)
     sc_ = 1.0 if two else 1.12
@@ -685,7 +691,8 @@ def draw_character_scene(ctx, sc, t, dur):
         pose = c.get("pose") or ("talk" if speaking else "idle")
         C.draw_character(ctx, xs[i], 1015, t, sc_, look=c.get("look", i * 2), pose=pose, prev_pose="idle",
                          pose_t=prog(t, 0.35, 0.5), emotion=c.get("emotion", "happy"),
-                         talking=bool(speaking and t < dur - 0.5), facing=-1 if i == 1 else 1, seed=i * 3 + 1,
+                         talking=bool(speaking and line_start <= t <= line_end + 0.1 if n else t < dur - 0.5),
+                         facing=-1 if i == 1 else 1, seed=i * 3 + 1,
                          enter=prog(t, 0.05 + 0.15 * i, 0.5))
     if sc.get("kicker") or sc.get("title"):
         x0 = 640 if two else 860

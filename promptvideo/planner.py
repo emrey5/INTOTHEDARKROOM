@@ -30,7 +30,7 @@ SCHEMA = """
     {"type": "table", "kicker": "...", "title": "...", "columns": ["...", "..."], "rows": [["...", "..."]], "source": "...", "narration": "..."},
     {"type": "image", "kicker": "...", "caption": "...", "image_query": "Wikimedia Commons'ta aranacak İngilizce terim", "narration": "..."},
     {"type": "video", "kicker": "...", "caption": "...", "stock_query": "stok video için 1-3 kelimelik İngilizce arama", "narration": "..."},
-    {"type": "character", "kicker": "...", "characters": [{"look": 0, "pose": "talk", "emotion": "happy"}], "say": [{"who": 0, "text": "karakterin söylediği kısa cümle"}], "narration": "..."},
+    {"type": "character", "kicker": "...", "characters": [{"look": 0, "pose": "talk", "emotion": "happy", "voice": "erkek ya da kadın"}], "say": [{"who": 0, "text": "karakterin söylediği kısa cümle"}], "narration": "..."},
     {"type": "versus", "kicker": "...", "title": "...", "left": {"label": "...", "value": 1.0}, "right": {"label": "...", "value": 2.0}, "unit": "", "higher_is_better": true, "source": "...", "narration": "..."},
     {"type": "people", "kicker": "...", "title": "...", "value": 30, "total": 100, "label": "Her 100 kişiden 30'u ...", "source": "...", "narration": "..."},
     {"type": "map", "map": "world ya da turkey", "kicker": "...", "title": "...", "unit": "", "data": [{"label": "ülke ya da il adı", "value": 1.0}], "presenter": true, "source": "...", "narration": "..."},
@@ -55,6 +55,7 @@ Kurallar:
 - Videoyu canlı tut: 1-2 "character" sahnesi ekle (çizgi karakterler konuşur; "say" balonda görünür,
   1-2 kısa cümle; iki karakter soru-cevap yapabilir). look 0-5 farklı karakterlerdir; pose: talk, point,
   present, wave, cheer, shrug, think; emotion: happy, neutral, surprised, sad, angry, worried.
+  Her karakter kendi sesiyle konuşur (look 1 ve 3 varsayılan olarak kadın, diğerleri erkek sesi).
   İki şeyi kıyaslarken "versus", bir oranı (yüzde) anlatırken "people" kullan.
 - Ülkelere ya da Türkiye'nin illerine göre veri varsa "map" sahnesi kullan (map: "world" ya da "turkey";
   label olarak Türkçe ülke/il adı yaz). "presenter": true ise köşede haritayı gösteren bir karakter durur.

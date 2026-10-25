@@ -10,6 +10,7 @@ import time
 from . import webdata as W
 from . import scenes, tts
 from . import audio as A
+from .scenes import _say_lines
 from .render import render_scene, concat
 
 MIN_DUR = {"title": 5, "bullets": 7, "stat": 5, "bar": 7, "line": 8, "pie": 7, "table": 7,
@@ -183,9 +184,21 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
             raise Cancelled()
         audio = None
         if sc["type"] == "character" and not sc.get("narration"):  # anlatım yoksa balondaki replikler okunur
-            from .scenes import _say_lines
             sc["narration"] = " ".join(x.get("text", "") for x in _say_lines(sc))
-        if not no_voice and sc.get("narration"):
+        lines = _say_lines(sc) if sc["type"] == "character" else []
+        if not no_voice and lines:  # her karakter kendi sesiyle konuşur
+            chars = sc.get("characters") or [{}]
+            voices = tts.character_voices(chars, lang, voice)
+            parts = []
+            for k, ln in enumerate(lines):
+                who = min(int(ln.get("who", 0)), len(voices) - 1)
+                parts.append(tts.synthesize(ln["text"], os.path.join(assets, f"voice_{i:02}_{k}.mp3"), lang, voices[who]))
+            if all(parts):
+                try:
+                    audio, sc["_line_times"] = tts.join(parts, os.path.join(assets, f"voice_{i:02}.wav"))
+                except Exception as e:
+                    log(f"  [ses] replikler birleştirilemedi: {e}")
+        elif not no_voice and sc.get("narration"):
             audio = tts.synthesize(sc["narration"], os.path.join(assets, f"voice_{i:02}.mp3"), lang, voice)
         sc["_audio"] = audio
         alen = tts.duration(audio) if audio else 0
