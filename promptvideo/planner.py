@@ -30,8 +30,8 @@ SCHEMA = """
     {"type": "table", "kicker": "...", "title": "...", "columns": ["...", "..."], "rows": [["...", "..."]], "source": "...", "narration": "..."},
     {"type": "image", "kicker": "...", "caption": "...", "image_query": "Wikimedia Commons'ta aranacak İngilizce terim", "narration": "..."},
     {"type": "video", "kicker": "...", "caption": "...", "stock_query": "stok video için 1-3 kelimelik İngilizce arama", "narration": "..."},
-    {"type": "character", "kicker": "...", "characters": [{"look": 0, "pose": "talk", "emotion": "happy", "voice": "erkek ya da kadın"}], "say": [{"who": 0, "text": "karakterin söylediği kısa cümle"}], "narration": "..."},
-    {"type": "versus", "kicker": "...", "title": "...", "left": {"label": "...", "value": 1.0}, "right": {"label": "...", "value": 2.0}, "unit": "", "higher_is_better": true, "source": "...", "narration": "..."},
+    {"type": "character", "kicker": "...", "backdrop": "studio", "characters": [{"look": 0, "pose": "talk", "emotion": "happy", "voice": "erkek ya da kadın"}], "say": [{"who": 0, "text": "karakterin söylediği kısa cümle"}], "narration": "..."},
+    {"type": "versus", "kicker": "...", "backdrop": "studio", "title": "...", "left": {"label": "...", "value": 1.0}, "right": {"label": "...", "value": 2.0}, "unit": "", "higher_is_better": true, "source": "...", "narration": "..."},
     {"type": "people", "kicker": "...", "title": "...", "value": 30, "total": 100, "label": "Her 100 kişiden 30'u ...", "source": "...", "narration": "..."},
     {"type": "map", "map": "world ya da turkey", "kicker": "...", "title": "...", "unit": "", "data": [{"label": "ülke ya da il adı", "value": 1.0}], "presenter": true, "source": "...", "narration": "..."},
     {"type": "outro", "title": "...", "sources": ["kaynak adı"], "narration": "..."}
@@ -56,6 +56,7 @@ Kurallar:
   1-2 kısa cümle; iki karakter soru-cevap yapabilir). look 0-5 farklı karakterlerdir; pose: talk, point,
   present, wave, cheer, shrug, think; emotion: happy, neutral, surprised, sad, angry, worried.
   Her karakter kendi sesiyle konuşur (look 1 ve 3 varsayılan olarak kadın, diğerleri erkek sesi).
+  "backdrop" konuya uygun mekân: studio, city, office, space, lab, nature.
   İki şeyi kıyaslarken "versus", bir oranı (yüzde) anlatırken "people" kullan.
 - Ülkelere ya da Türkiye'nin illerine göre veri varsa "map" sahnesi kullan (map: "world" ya da "turkey";
   label olarak Türkçe ülke/il adı yaz). "presenter": true ise köşede haritayı gösteren bir karakter durur.
@@ -115,6 +116,21 @@ def _short(s, n=80):
     return s if len(s) <= n else s[: n - 1].rsplit(" ", 1)[0] + "…"
 
 
+BACKDROP_WORDS = {"space": ("uzay", "gezegen", "astronomi", "yıldız", "ay ", "mars", "nasa", "roket"),
+                  "lab": ("bilim", "sağlık", "ilaç", "hastalık", "virüs", "kimya", "deney", "obezite", "kanser"),
+                  "office": ("ekonomi", "şirket", "iş ", "enflasyon", "gsyh", "borsa", "maaş", "işsizlik", "borç"),
+                  "city": ("şehir", "nüfus", "kent", "trafik", "konut", "ülke"),
+                  "nature": ("doğa", "iklim", "orman", "hayvan", "co2", "karbon", "enerji", "su ", "kahve", "tarım")}
+
+
+def pick_backdrop(text):
+    low = f" {text.lower()} "
+    for name, words in BACKDROP_WORDS.items():
+        if any(w in low for w in words):
+            return name
+    return "studio"
+
+
 def plan_fallback(prompt, findings, lang="tr", log=print):
     """Yapay zekâ yokken seçili bulgulardan basit ama veriye dayalı bir senaryo kurar."""
     sel = R.selected(findings)
@@ -124,7 +140,8 @@ def plan_fallback(prompt, findings, lang="tr", log=print):
     sents = _sentences(wiki["text"], 5) if wiki else []
     scenes.append({"type": "title", "title": title, "subtitle": _short(sents[0], 110) if sents else "",
                    "narration": sents[0] if sents else title})
-    scenes.append({"type": "character", "kicker": "Anlatıcı", "characters": [{"look": 0, "pose": "wave"}],
+    scenes.append({"type": "character", "kicker": "Anlatıcı", "backdrop": pick_backdrop(prompt),
+                   "characters": [{"look": 0, "pose": "wave"}],
                    "say": [{"who": 0, "text": f"Merhaba! Bugün {title} konusuna birlikte bakıyoruz."}],
                    "narration": f"Merhaba! Bugün {title} konusuna birlikte bakıyoruz."})
     scenes.append({"type": "video", "stock_query": title, "caption": title, "kicker": "",

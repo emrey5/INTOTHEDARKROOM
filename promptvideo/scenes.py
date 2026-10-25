@@ -6,6 +6,7 @@ import cairo
 
 from . import draw as D
 from . import characters as C
+from . import backdrops as B
 from . import theme as th
 from .theme import (W, H, clamp, prog, lerp, ease_out_cubic, ease_out_back, ease_out_expo,
                     ease_in_out, ease_out_elastic, fmt_num, mix)
@@ -671,6 +672,7 @@ def _chars(sc, n=2):
 
 def draw_character_scene(ctx, sc, t, dur):
     """Bir ya da iki karakter konuşur; repliği konuşma balonunda görünür."""
+    B.draw_backdrop(ctx, sc.get("backdrop", "studio"), t)
     chars = _chars(sc)
     lines = _say_lines(sc)
     n = len(lines)
@@ -715,6 +717,7 @@ def draw_character_scene(ctx, sc, t, dur):
 
 def draw_versus(ctx, sc, t, dur):
     """İki taraf karşı karşıya: sayılar sayarak büyür, kazanan sevinir."""
+    B.draw_backdrop(ctx, sc.get("backdrop", "studio"), t)
     D.header(ctx, sc.get("title", ""), sc.get("kicker"), t)
     left, right = sc.get("left") or {}, sc.get("right") or {}
     lv, rv = _num(left.get("value")), _num(right.get("value"))
