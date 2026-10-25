@@ -16,9 +16,10 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QLabel,
     QPlainTextEdit, QPushButton, QComboBox, QLineEdit, QFileDialog, QProgressBar, QTabWidget,
     QListWidget, QListWidgetItem, QFrame, QMessageBox, QSplitter, QSizePolicy, QCheckBox,
-    QFormLayout, QDoubleSpinBox, QToolButton, QScrollArea, QButtonGroup, QInputDialog)
+    QFormLayout, QDoubleSpinBox, QToolButton, QScrollArea, QButtonGroup, QInputDialog, QStackedWidget)
 
 from . import theme, pipeline, planner, scenes, updater, userdata, __version__
+from .waitscreen import WaitScreen
 from . import draw as D
 from .render import render_frame
 
@@ -226,6 +227,11 @@ class Worker(QThread):
         self.mode, self.prompt, self.plan, self.out_dir, self.opts = mode, prompt, plan, out_dir, opts or {}
         self.findings = findings
         self._cancel = threading.Event()
+
+    def on_progress(self, f):
+        self.bar.setValue(int(f * 1000))
+        i, n = getattr(self, "_stage", (1, 1))
+        self.wait.set_progress((i - 1 + f) / n)  # bütün işin ilerlemesi: adamın yamaçtaki yeri
 
     def cancel(self):
         self._cancel.set()
@@ -603,7 +609,11 @@ class MainWindow(QMainWindow):
         self.preview.setMinimumSize(640, 360)
         self.preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.preview.setText("> Bir konu yazıp  [ ARAŞTIR ]  düğmesine basın_")
-        v.addWidget(self.preview, 1)
+        self.wait = WaitScreen()  # iş sürerken: kayayı zirveye iten piksel adam
+        self.preview_stack = QStackedWidget()
+        self.preview_stack.addWidget(self.preview)
+        self.preview_stack.addWidget(self.wait)
+        v.addWidget(self.preview_stack, 1)
 
         steps = QHBoxLayout()
         self.step_labels = []
@@ -937,6 +947,13 @@ class MainWindow(QMainWindow):
                 "ollama.com</a>, sonra komut satırında <b>ollama pull qwen3:8b</b>")
 
     def set_busy(self, busy):
+        if busy:
+            self._stage = (1, 1)
+            self.wait.start(self.status.text().rstrip("…") if self.status.text() != "SİSTEM HAZIR" else "")
+            self.preview_stack.setCurrentWidget(self.wait)
+        else:
+            self.wait.stop()
+            self.preview_stack.setCurrentWidget(self.preview)
         self.btn_research.setEnabled(not busy)
         self.btn_plan.setEnabled(not busy and self.findings is not None)
         self.btn_write.setEnabled(not busy and self.findings is not None)
@@ -950,12 +967,18 @@ class MainWindow(QMainWindow):
             l.style().polish(l)
         self.status.setText(label + "…")
         self.bar.setValue(0)
+        if self.worker and self.worker.mode in ("research", "plan"):
+            i, n = 1, 1  # tek aşamalı işler: dağın tamamı bu iş
+        self._stage = (i, max(1, n))
+        self.wait.set_stage(label)
+        self.wait.set_progress((i - 1) / max(1, n))
 
     def append_log(self, s):
         self.log.appendPlainText(s)
 
     def show_preview(self, im):
         pm = pil_to_pixmap(im)
+        self.preview_stack.setCurrentWidget(self.preview)  # çizim başladı: bekleme ekranı yerine kareler
         self.preview.setPixmap(pm.scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def save_settings(self):
@@ -1036,9 +1059,14 @@ class MainWindow(QMainWindow):
     def _wire(self, w):
         w.log.connect(self.append_log)
         w.stage.connect(self.mark_stage)
-        w.progress.connect(lambda f: self.bar.setValue(int(f * 1000)))
+        w.progress.connect(self.on_progress)
         w.preview.connect(self.show_preview)
         w.failed.connect(self.on_failed)
+
+    def on_progress(self, f):
+        self.bar.setValue(int(f * 1000))
+        i, n = getattr(self, "_stage", (1, 1))
+        self.wait.set_progress((i - 1 + f) / n)  # bütün işin ilerlemesi: adamın yamaçtaki yeri
 
     def cancel(self):
         if self.worker:
