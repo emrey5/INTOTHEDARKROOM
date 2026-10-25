@@ -11,6 +11,7 @@ import random
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
@@ -199,7 +200,7 @@ class Splash(QWidget):
         self.show()
         self.timer.start()
         if self.sound:
-            QTimer.singleShot(30, play_sound)
+            threading.Thread(target=play_sound, daemon=True).start()  # ses üretimi animasyonu bekletmesin
 
     def elapsed(self):
         if self.clock is not None:
