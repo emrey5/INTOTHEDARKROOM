@@ -61,15 +61,16 @@ def _lamp(t):
 
 
 def _sound_path():
-    """Mekanik ve karanlık ses: sürgü tıkları, kapı motoru ve hidrolik tıslama, lamba şalteri ve vızıltısı,
-    her harfte pres darbesi, sonda ağır çelik kilitlenme; altta uyumsuz derin bir uğultu."""
-    path = os.path.join(tempfile.gettempdir(), "darkroom_acilis_v6.wav")
+    """Temiz, ince mekanik ses: saat mekanizması gibi tıklar, yumuşak hava süpürmesi (kapı),
+    hafif elektrik tınısı (lamba), her harfte ince bir tık ve sonda derin ama pürüzsüz bir kilit sesi.
+    Bozulma (distorsiyon) ve kare/testere dalga yok; her şey sinüs ve süzülmüş gürültüden."""
+    path = os.path.join(tempfile.gettempdir(), "darkroom_acilis_v7.wav")
     if os.path.exists(path):
         return path
     import numpy as np
     from . import audio as A
     sr = A.SR
-    rng = np.random.default_rng(17)
+    rng = np.random.default_rng(21)
     total = DURATION + 0.4
     out = np.zeros(int(total * sr))
 
@@ -84,70 +85,54 @@ def _sound_path():
     def lp(x, k):
         return np.convolve(x, np.ones(k) / k, mode="same")
 
-    def hp(x, k=2):
-        return x - lp(x, k)
+    def soft(t, attack):
+        return np.minimum(1, t / attack)
 
-    def saw(f, t):
-        ph = np.cumsum(np.broadcast_to(f, t.shape)) / sr
-        return 2 * (ph % 1) - 1
+    def tick(f=3800, body=0.3):
+        """İnce mekanik tık: saat dişlisi gibi kısa, temiz bir tını ve küçük bir gövde."""
+        t = tt(0.06)
+        x = np.sin(2 * np.pi * f * t) * np.exp(-t / 0.0018)
+        x += 0.4 * np.sin(2 * np.pi * f * 1.61 * t) * np.exp(-t / 0.0012)
+        x += body * np.sin(2 * np.pi * 420 * t) * np.exp(-t / 0.006)
+        return x * soft(t, 0.0003)
 
-    def clack(f=2400, body=1.0, d=0.12):
-        """Çelik sürgü / röle: sert tık + kısa metal tını + gövde."""
+    def whoosh(d=0.55):
+        """Yumuşak hava süpürmesi: gürültü giderek açılan bir süzgeçten geçer."""
+        n = int(d * sr)
+        noise = rng.standard_normal(n)
+        x = 0.6 * lp(noise, 40) + 0.4 * lp(noise, 14) * np.linspace(0.3, 1, n)
+        return x * np.sin(np.linspace(0, np.pi, n)) ** 2
+
+    def lock(d=1.4):
+        """Derin, pürüzsüz kilit: inen alçak sinüs + yumuşak metal tınısı + temiz tık."""
         t = tt(d)
-        click = lp(rng.standard_normal(len(t)), 3) * np.exp(-t / 0.002) * 0.6
-        ring = sum(np.sin(2 * np.pi * f * m * t) * a for m, a in ((1, 0.5), (1.53, 0.35), (2.7, 0.2)))
-        ring *= np.exp(-t / 0.012) * 0.6
-        body = body * 0.8
-        thump = np.sin(2 * np.pi * np.cumsum(180 * np.exp(-t * 30) + 60) / sr) * np.exp(-t / 0.03) * body
-        return click + ring + thump
+        sub = np.sin(2 * np.pi * np.cumsum(95 * np.exp(-t * 5) + 48) / sr) * np.exp(-t / 0.35)
+        ring = sum(a * np.sin(2 * np.pi * f * t) * np.exp(-t / dc)
+                   for f, a, dc in ((220, 0.35, 0.5), (330.5, 0.2, 0.4), (587, 0.12, 0.25), (1046, 0.06, 0.15)))
+        return (sub * 0.9 + ring) * soft(t, 0.004)
 
-    def slam(f0=120, ring=1.0):
-        """Ağır çelik kapı / kilit: alçak darbe + uyumsuz, karanlık metal çınlaması."""
-        t = tt(0.4 + 1.6 * ring)
-        modes = ((1.0, 1.0, 0.6), (1.07, 0.7, 0.55), (2.76, 0.45, 0.3), (4.13, 0.3, 0.16), (6.9, 0.2, 0.08))
-        x = sum(a * np.sin(2 * np.pi * f0 * m * t + rng.random() * 6) * np.exp(-t / (dc * ring))
-                for m, a, dc in modes)
-        hit = lp(rng.standard_normal(len(t)), 8) * np.exp(-t / 0.012) * 0.5
-        sub = np.sin(2 * np.pi * np.cumsum(85 * np.exp(-t * 6) + 30) / sr) * np.exp(-t / (0.3 * ring))
-        return np.tanh((x * 0.45 + hit + sub * 1.3) * 1.2) * np.minimum(1, t / 0.006)
-
-    # alttaki karanlık uğultu: sürten iki bas, sona doğru kabarır
-    t = tt(total)
-    drone = np.sin(2 * np.pi * 41 * t) + 0.9 * np.sin(2 * np.pi * 43.5 * t) + 0.35 * lp(saw(41, t), 30)
-    drone *= (0.35 + 0.65 * np.clip(t / T_LOCK, 0, 1) ** 2) * np.minimum(1, t / 0.4) * np.clip((total - t) / 1.0, 0, 1)
-    put(0, drone, 0.16)
-    # sürgüler
-    for k, s in enumerate(T_BOLTS):
-        put(s, clack(1600 + k * 140, 1.0), 0.4)
-    # kapı motoru: kaba testere dalga + dişli titreşimi, hidrolik tıslama
-    d = T_DOOR[1] + 0.1
-    t = tt(d)
-    f = 55 + 40 * np.sin(np.minimum(1, t / d) * np.pi)
-    motor = np.tanh(lp(saw(f, t), 4) * 2) * (1 + 0.5 * np.sign(np.sin(2 * np.pi * 22 * t)))
-    motor *= np.minimum(1, t / 0.05) * np.clip((d - t) / 0.08, 0, 1)
-    put(T_DOOR[0], lp(motor, 8), 0.12)
-    ht = tt(0.6)
-    put(T_DOOR[0], hp(rng.standard_normal(len(ht)), 3) * np.exp(-ht / 0.18) * np.minimum(1, ht / 0.08), 0.12)
-    put(T_DOOR[0] + T_DOOR[1], slam(150, 0.3), 0.3)  # kapı dayanır
-    # lamba şalteri ve vızıltısı (titreşimle birlikte)
-    put(T_LAMP - 0.03, clack(1300, 1.2, 0.15), 0.35)
+    # kapı sürgüleri
+    for k, sec in enumerate(T_BOLTS):
+        put(sec, tick(3200 + k * 260, 0.5), 0.35)
+    # kapı açılırken hava süpürmesi
+    put(T_DOOR[0] - 0.05, whoosh(T_DOOR[1] + 0.2), 0.12)
+    # lamba: hafif elektrik tınısı ve çok kısık, temiz bir 100 Hz mırıltı
+    put(T_LAMP, tick(2600, 0.2), 0.25)
     t = tt(total - T_LAMP)
-    buzz = lp(np.sign(np.sin(2 * np.pi * 100 * t)) + 0.4 * np.sign(np.sin(2 * np.pi * 150 * t)), 5)
-    level = np.array([_lamp(T_LAMP + x) for x in t[::441]])
-    buzz *= np.repeat(level, 441)[: len(buzz)] * np.clip((total - T_LAMP - t) / 0.8, 0, 1)
-    put(T_LAMP, buzz, 0.025)
-    # her harf yerine çakılırken pres darbesi
+    hum = (np.sin(2 * np.pi * 100 * t) + 0.3 * np.sin(2 * np.pi * 200 * t)) * soft(t, 0.3)
+    put(T_LAMP, hum * np.clip((total - T_LAMP - t) / 0.6, 0, 1), 0.02)
+    # harfler: her biri ince bir tık, hafifçe yükselen perdeyle
     for i in range(len(WORD)):
-        put(T_LETTER + i * LETTER_GAP + LETTER_FLY, clack(900 + (i % 3) * 70, 1.4, 0.15), 0.28)
-    # son ağır kilitlenme
-    put(T_LOCK, slam(110, 0.9), 0.8)
-    put(T_LOCK, clack(1400, 1.8, 0.2), 0.3)
-    fo = int(0.6 * sr)  # pencere geçişiyle birlikte ses de yumuşakça söner
-    end = int((DURATION + 0.3) * sr)
+        put(T_LETTER + i * LETTER_GAP + LETTER_FLY, tick(3000 + i * 120, 0.35), 0.22)
+    # son kilit
+    put(T_LOCK, lock(), 0.55)
+    put(T_LOCK, tick(2400, 0.8), 0.3)
+    # pencere geçişiyle birlikte sönme
+    fo, end = int(0.6 * sr), int((DURATION + 0.3) * sr)
     out[end - fo:end] *= np.linspace(1, 0, fo)
     out[end:] = 0
     peak = np.max(np.abs(out)) or 1
-    A._write(path, np.tanh(out / peak * 1.5) * 0.9)
+    A._write(path, out / peak * 0.7)  # doğrusal normalleştirme, bozulma yok
     return path
 
 
