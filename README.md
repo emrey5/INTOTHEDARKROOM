@@ -1,4 +1,4 @@
-# INTOTHEDARKROOM · PromptVideo Stüdyo
+# DARKROOM
 
 Prompt'tan veri destekli animasyonlu video üreten masaüstü uygulaması (tamamen ücretsiz).
 
@@ -6,7 +6,7 @@ Bir konu yazarsınız; program webden veriyi toplar, senaryoyu yazar, animasyonl
 tablo, sayaç, görsel ve video sahneleri çizer, Türkçe seslendirir ve tek bir MP4 verir.
 Hiçbir ücretli servis kullanmaz.
 
-## Masaüstü uygulaması: PromptVideo Stüdyo
+## Masaüstü uygulaması: DARKROOM
 
 **Windows'ta en kolay yol:**
 1. Python 3.10+ kurun (kurarken "Add Python to PATH" kutusunu işaretleyin): `winget install Python.Python.3.12`
@@ -16,9 +16,9 @@ Hiçbir ücretli servis kullanmaz.
 ffmpeg ayrıca kurulmaz, uygulamanın içinde gelir.
 
 **Tek tıkla açılan .exe ve kurulum dosyası** yapmak isterseniz `exe_olustur_windows.bat`
-çalıştırın: `dist\PromptVideo\PromptVideo.exe` oluşur. Ücretsiz Inno Setup ile `kurulum.iss`
-dosyasını derlerseniz başkalarına verebileceğiniz `PromptVideo-Kurulum.exe` çıkar.
-Kurulumu denemek için: `PromptVideo.exe --selftest deneme` (2 sahnelik deneme videosu çizer).
+çalıştırın: `dist\DARKROOM\DARKROOM.exe` oluşur. Ücretsiz Inno Setup ile `kurulum.iss`
+dosyasını derlerseniz başkalarına verebileceğiniz `DARKROOM-Kurulum.exe` çıkar.
+Kurulumu denemek için: `DARKROOM.exe --selftest deneme` (2 sahnelik deneme videosu çizer).
 
 Uygulamada:
 - **Konu** kutusuna videonun konusunu yazın ya da örneklerden birine tıklayın.
@@ -111,7 +111,7 @@ kontrol edin, sonra `--plan` ile çizin. Planı elle yazmak da mümkün.
    yazın (ör. `v0.3.1`; her seferinde bir öncekinden büyük olmalı), kısa bir not yazıp
    **Publish release** deyin.
 3. GitHub Actions (`.github/workflows/release.yml`) Windows'ta uygulamayı paketler, deneme videosu
-   çizdirerek test eder ve `PromptVideo-0.3.1-Kurulum.exe` dosyasını o sürüme ekler (~10-15 dk).
+   çizdirerek test eder ve `DARKROOM-0.3.1-Kurulum.exe` dosyasını o sürüme ekler (~10-15 dk).
 4. Kurulu uygulamalar açılışta yeni sürümü görür: üstte turuncu **YENİ SÜRÜM** şeridi çıkar,
    **GÜNCELLE** kurulumu indirir, uygulamayı kapatıp yeni sürümü kurar ve yeniden açar.
 

@@ -40,12 +40,12 @@ jobs:
           python -m pip install -r requirements.txt pyinstaller
 
       - name: Uygulamayı paketle (PyInstaller)
-        run: python -m PyInstaller --noconfirm --clean PromptVideo.spec
+        run: python -m PyInstaller --noconfirm --clean DARKROOM.spec
 
       - name: Duman testi (2 sahnelik deneme videosu)
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath dist\PromptVideo\PromptVideo.exe -ArgumentList "--selftest","selftest" -Wait -PassThru
+          $p = Start-Process -FilePath dist\DARKROOM\DARKROOM.exe -ArgumentList "--selftest","selftest" -Wait -PassThru
           if ($p.ExitCode -ne 0 -or -not (Test-Path selftest\video.mp4)) { Write-Error "Deneme videosu üretilemedi"; exit 1 }
 
       - name: Kurulum dosyası (Inno Setup)
@@ -61,11 +61,11 @@ jobs:
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: Output/PromptVideo-${{ env.VERSION }}-Kurulum.exe
+          files: Output/DARKROOM-${{ env.VERSION }}-Kurulum.exe
 
       - name: Deneme derlemesini sakla
         if: github.event_name != 'release'
         uses: actions/upload-artifact@v4
         with:
-          name: PromptVideo-${{ env.VERSION }}-Kurulum
+          name: DARKROOM-${{ env.VERSION }}-Kurulum
           path: Output/*.exe

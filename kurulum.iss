@@ -7,18 +7,18 @@
 [Setup]
 ; AppId değişmemeli: güncellemeler aynı kurulumun üstüne yazılır
 AppId={{6E3F2B8A-4C1D-4E7B-9A55-2D8F0C3B7A11}
-AppName=PromptVideo Stüdyo
+AppName=DARKROOM
 AppVersion={#MyAppVersion}
 AppPublisher=emrey5
 AppPublisherURL=https://github.com/emrey5/INTOTHEDARKROOM
-DefaultDirName={localappdata}\Programs\PromptVideo
+DefaultDirName={localappdata}\Programs\DARKROOM
 PrivilegesRequired=lowest
-DefaultGroupName=PromptVideo
+DefaultGroupName=DARKROOM
 DisableProgramGroupPage=yes
 OutputDir=Output
-OutputBaseFilename=PromptVideo-{#MyAppVersion}-Kurulum
+OutputBaseFilename=DARKROOM-{#MyAppVersion}-Kurulum
 SetupIconFile=promptvideo\assets\icon.ico
-UninstallDisplayIcon={app}\PromptVideo.exe
+UninstallDisplayIcon={app}\DARKROOM.exe
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -32,15 +32,15 @@ Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"
 Name: "desktopicon"; Description: "Masaüstüne kısayol oluştur"; GroupDescription: "Ek simgeler:"
 
 [Files]
-Source: "dist\PromptVideo\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "dist\DARKROOM\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [InstallDelete]
 ; eski sürümden kalan kitaplık dosyaları yenileriyle karışmasın
 Type: filesandordirs; Name: "{app}\_internal"
 
 [Icons]
-Name: "{group}\PromptVideo Stüdyo"; Filename: "{app}\PromptVideo.exe"
-Name: "{autodesktop}\PromptVideo Stüdyo"; Filename: "{app}\PromptVideo.exe"; Tasks: desktopicon
+Name: "{group}\DARKROOM"; Filename: "{app}\DARKROOM.exe"
+Name: "{autodesktop}\DARKROOM"; Filename: "{app}\DARKROOM.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\PromptVideo.exe"; Description: "PromptVideo Stüdyo'yu başlat"; Flags: nowait postinstall
+Filename: "{app}\DARKROOM.exe"; Description: "DARKROOM'u başlat"; Flags: nowait postinstall

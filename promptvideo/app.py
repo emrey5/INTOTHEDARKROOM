@@ -1,4 +1,4 @@
-"""PromptVideo Stüdyo: masaüstü uygulaması (PySide6).
+"""DARKROOM: masaüstü uygulaması (PySide6).
 
 Akış: konu yaz -> senaryoyu hazırla (araştırma + plan) -> sahneleri gözden geçir/düzenle ->
 videoyu oluştur (canlı önizleme ile) -> videoyu aç.
@@ -22,7 +22,7 @@ from . import theme, pipeline, planner, scenes, updater, __version__
 from . import draw as D
 from .render import render_frame
 
-APP_NAME = "PromptVideo Stüdyo"
+APP_NAME = "DARKROOM"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 SCENE_TYPES = {
@@ -300,7 +300,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME}  v{__version__}")
         self.resize(1440, 900)
-        self.settings = QSettings("PromptVideo", "Studio")
+        self.settings = QSettings("DARKROOM", "DARKROOM")
         self.plan = None
         self.plan_dir = None
         self.worker = None
@@ -343,8 +343,8 @@ class MainWindow(QMainWindow):
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
-        v.addWidget(QLabel("▌PROMPTVIDEO", objectName="brand"))
-        v.addWidget(QLabel("// STÜDYO · veri destekli animasyon motoru", objectName="brandsub"))
+        v.addWidget(QLabel("▌DARKROOM", objectName="brand"))
+        v.addWidget(QLabel("// PROMPT → VIDEO · veri destekli animasyon motoru", objectName="brandsub"))
 
         v.addWidget(self._section("Konu"))
         self.prompt = QPlainTextEdit()
@@ -394,7 +394,7 @@ class MainWindow(QMainWindow):
 
         v.addWidget(self._section("Kayıt klasörü"))
         h = QHBoxLayout()
-        default_out = os.path.join(os.path.expanduser("~"), "Videos", "PromptVideo")
+        default_out = os.path.join(os.path.expanduser("~"), "Videos", "DARKROOM")
         self.outdir = QLineEdit(self.settings.value("outdir", default_out))
         ob = QPushButton("Seç")
         ob.clicked.connect(self.pick_outdir)

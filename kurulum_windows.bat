@@ -1,6 +1,6 @@
 @echo off
 cd /d "%~dp0"
-echo PromptVideo Studyo icin gerekli paketler kuruluyor...
+echo DARKROOM icin gerekli paketler kuruluyor...
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 if errorlevel 1 (

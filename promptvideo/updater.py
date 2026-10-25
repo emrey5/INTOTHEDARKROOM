@@ -32,7 +32,7 @@ def is_newer(remote, local=__version__):
 
 def _headers(token=None, binary=False):
     h = {"Accept": "application/octet-stream" if binary else "application/vnd.github+json",
-         "User-Agent": f"PromptVideo/{__version__}"}
+         "User-Agent": f"DARKROOM/{__version__}"}
     token = token or os.environ.get("PV_GITHUB_TOKEN")
     if token:
         h["Authorization"] = f"Bearer {token}"

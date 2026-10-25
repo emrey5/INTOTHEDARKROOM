@@ -1,7 +1,7 @@
-"""PromptVideo Stüdyo başlatıcı (masaüstü uygulaması ve PyInstaller giriş noktası).
+"""DARKROOM başlatıcı (masaüstü uygulaması ve PyInstaller giriş noktası).
 
-    PromptVideo.exe               uygulamayı açar
-    PromptVideo.exe --selftest D  D klasörüne 2 sahnelik deneme videosu çizer (kurulum kontrolü)
+    DARKROOM.exe               uygulamayı açar
+    DARKROOM.exe --selftest D  D klasörüne 2 sahnelik deneme videosu çizer (kurulum kontrolü)
 """
 import multiprocessing
 import os

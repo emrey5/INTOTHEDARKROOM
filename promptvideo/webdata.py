@@ -5,7 +5,7 @@ import urllib.parse
 
 import requests
 
-UA = {"User-Agent": "promptvideo/0.1 (https://github.com/; egitim amacli)"}
+UA = {"User-Agent": "DARKROOM/0.3 (https://github.com/emrey5/INTOTHEDARKROOM)"}
 S = requests.Session()
 S.headers.update(UA)
 
