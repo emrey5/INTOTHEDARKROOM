@@ -1,5 +1,9 @@
-"""Açılış efekti: diyafram açılır, DARKROOM harfleri şifre çözer gibi yerine oturur, sistem satırları akar.
-Tıklayınca geçilir. Ses Windows'ta winsound, macOS'ta afplay ile çalınır; yoksa sessiz geçer."""
+"""Açılış efekti: "karanlık odaya giriş".
+
+Ağır çelik kapının sürgüleri çekilir, kapı açılır; kamera karanlık odanın içine ilerler, dipteki turuncu
+karanlık oda lambası (safelight) titreyerek yanar ve DARKROOM harfleri karanlıktan tek tek öne gelip
+yerine kilitlenir. Tıklayınca geçilir. Ses Windows'ta winsound, macOS'ta afplay ile çalınır; yoksa sessiz geçer.
+"""
 import math
 import os
 import random
@@ -12,17 +16,25 @@ from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QRadialGradient, QLinearGradient
 from PySide6.QtWidgets import QWidget, QApplication
 
-BG = QColor(10, 9, 8)
+BG = QColor(6, 5, 5)
 ORANGE = QColor(255, 122, 26)
 DEEP = QColor(255, 77, 26)
 TEXT = QColor(242, 236, 228)
 MUTED = QColor(140, 130, 119)
 GRID = QColor(40, 34, 30)
 
-DURATION = 3.2
+DURATION = 4.0
 WORD = "DARKROOM"
-GLYPHS = "ABCDEFGHJKLMNPRSTUVXYZ0123456789#%&$*+<>/"
-LINES = ["› yazı tipleri yüklendi", "› harita verisi hazır", "› ses motoru çalışıyor", "› animasyon motoru hazır"]
+LINES = ["› kapı kilidi açıldı", "› karanlık oda lambası yandı", "› animasyon motoru hazır"]
+
+# zaman çizelgesi (saniye): ses de bu anlara göre üretilir
+T_BOLTS = (0.30, 0.42, 0.54)   # sürgüler çekilir
+T_DOOR = (0.65, 0.75)          # kapı açılmaya başlar, süre
+T_LAMP = 1.45                  # karanlık oda lambası yanar
+T_LETTER = 1.65                # ilk harf yola çıkar
+LETTER_GAP = 0.12
+LETTER_FLY = 0.5
+T_LOCK = T_LETTER + (len(WORD) - 1) * LETTER_GAP + LETTER_FLY + 0.08  # son, ağır kilitlenme
 
 
 def _p(t, start, dur):
@@ -33,22 +45,31 @@ def _ease(x):
     return 1 - (1 - x) ** 3
 
 
-def _back(x, s=1.8):
-    x -= 1
-    return x * x * ((s + 1) * x + s) + 1
+def _ease_in_out(x):
+    return x * x * (3 - 2 * x)
+
+
+def _lamp(t):
+    """Lambanın parlaklığı: yanarken birkaç kez titrer, sonra hafifçe dalgalanır."""
+    if t < T_LAMP:
+        return 0.0
+    d = t - T_LAMP
+    if d < 0.35:
+        return (0.9, 0.1, 0.7, 0.0, 1.0, 0.3, 1.0)[int(d / 0.05)]
+    return 0.92 + 0.08 * math.sin(t * 37) * math.sin(t * 13)
 
 
 def _sound_path():
-    """Korkutucu açılış: uyumsuz derin uğultu, paslı metal gıcırtısı, karanlık metal darbeler,
-    geri sarılmış nefes gibi yükselen ses ve logo kilitlenirken ağır, bozuk bir "BRAAM" darbesi."""
-    path = os.path.join(tempfile.gettempdir(), "darkroom_acilis_v4.wav")
+    """Mekanik ve karanlık ses: sürgü tıkları, kapı motoru ve hidrolik tıslama, lamba şalteri ve vızıltısı,
+    her harfte pres darbesi, sonda ağır çelik kilitlenme; altta uyumsuz derin bir uğultu."""
+    path = os.path.join(tempfile.gettempdir(), "darkroom_acilis_v5.wav")
     if os.path.exists(path):
         return path
     import numpy as np
     from . import audio as A
     sr = A.SR
-    rng = np.random.default_rng(13)
-    total = 4.0
+    rng = np.random.default_rng(17)
+    total = DURATION + 0.6
     out = np.zeros(int(total * sr))
 
     def tt(d):
@@ -62,69 +83,65 @@ def _sound_path():
     def lp(x, k):
         return np.convolve(x, np.ones(k) / k, mode="same")
 
+    def hp(x, k=2):
+        return x - lp(x, k)
+
     def saw(f, t):
         ph = np.cumsum(np.broadcast_to(f, t.shape)) / sr
         return 2 * (ph % 1) - 1
 
-    # 1) uyumsuz derin uğultu: birbirine sürten iki bas ve bir triton, yavaşça kabarır
-    t = tt(total)
-    drone = (np.sin(2 * np.pi * 41 * t) + np.sin(2 * np.pi * 43.6 * t) * 0.9
-             + np.sin(2 * np.pi * 58 * t) * 0.5 + lp(saw(41, t), 30) * 0.4)
-    swell = np.clip(t / 1.6, 0, 1) ** 2
-    drone *= (0.25 + 0.75 * swell) * np.clip((total - t) / 1.2, 0, 1)
-    put(0, drone, 0.22)
+    def clack(f=2400, body=1.0, d=0.12):
+        """Çelik sürgü / röle: sert tık + kısa metal tını + gövde."""
+        t = tt(d)
+        click = hp(rng.standard_normal(len(t))) * np.exp(-t / 0.002) * 1.4
+        ring = sum(np.sin(2 * np.pi * f * m * t) * a for m, a in ((1, 0.5), (1.53, 0.35), (2.7, 0.2)))
+        ring *= np.exp(-t / 0.018)
+        thump = np.sin(2 * np.pi * np.cumsum(180 * np.exp(-t * 30) + 60) / sr) * np.exp(-t / 0.03) * body
+        return click + ring + thump
 
-    # 2) paslı metal gıcırtısı: yapışıp kayan (stick-slip) darbeler, rezonanslı metal gövde
-    d = 1.15
-    clip = np.zeros(int(d * sr))
-    k = 0.0
-    while k < d:
-        f = 700 + 500 * np.sin(k / d * np.pi) + rng.uniform(-80, 80)
-        n = int(0.02 * sr)
-        tn = np.arange(n) / sr
-        g = np.sin(2 * np.pi * f * tn) + 0.5 * np.sin(2 * np.pi * f * 2.13 * tn)
-        g *= np.exp(-tn / 0.006)
-        i = int(k * sr)
-        j = min(len(clip), i + n)
-        clip[i:j] += g[: j - i] * rng.uniform(0.6, 1.0)
-        k += 1 / rng.uniform(28, 75)
-    clip *= np.sin(np.linspace(0, np.pi, len(clip))) ** 0.5
-    put(0.25, clip, 0.28)
-
-    # 3) karanlık metal darbe: alçak, uyumsuz tınılar + gövde
-    def dark_hit(f0=150, ring=1.0, weight=1.0):
-        t = tt(0.3 + 1.8 * ring)
-        modes = ((1.0, 1.0, 0.8), (1.07, 0.7, 0.7), (2.76, 0.5, 0.35), (4.13, 0.3, 0.2), (6.9, 0.2, 0.1))
+    def slam(f0=120, ring=1.0):
+        """Ağır çelik kapı / kilit: alçak darbe + uyumsuz, karanlık metal çınlaması."""
+        t = tt(0.4 + 1.6 * ring)
+        modes = ((1.0, 1.0, 0.6), (1.07, 0.7, 0.55), (2.76, 0.45, 0.3), (4.13, 0.3, 0.16), (6.9, 0.2, 0.08))
         x = sum(a * np.sin(2 * np.pi * f0 * m * t + rng.random() * 6) * np.exp(-t / (dc * ring))
                 for m, a, dc in modes)
-        hit = lp(rng.standard_normal(len(t)), 3) * np.exp(-t / 0.01)
-        sub = np.sin(2 * np.pi * np.cumsum(90 * np.exp(-t * 6) + 32) / sr) * np.exp(-t / (0.25 * ring)) * weight
-        return np.tanh((x * 0.6 + hit + sub * 1.2) * 1.5)
+        hit = lp(rng.standard_normal(len(t)), 3) * np.exp(-t / 0.012) * 1.2
+        sub = np.sin(2 * np.pi * np.cumsum(85 * np.exp(-t * 6) + 30) / sr) * np.exp(-t / (0.3 * ring))
+        return np.tanh((x * 0.6 + hit + sub * 1.3) * 1.6)
 
-    put(0.06, dark_hit(140, 0.7, 0.8), 0.55)
-    put(0.95, dark_hit(132, 0.7, 0.9), 0.6)
-
-    # 4) tersine nefes: gürültü yükselip aniden kesilir, son darbeye çeker
-    rt = tt(0.9)
-    breath = lp(rng.standard_normal(len(rt)), 6) * (rt / rt[-1]) ** 3
-    put(0.70, breath, 0.35)
-
-    # 5) BRAAM: bozuk, kalın bas akor (küçük ikili sürtünme) + düşen sub + karanlık metal
-    t = tt(2.4)
-    env = np.minimum(1, t / 0.015) * np.exp(-t / 0.9)
-    chord = sum(lp(saw(f * (1 + 0.004 * np.sin(2 * np.pi * 0.7 * t + i)), t), 8) * a
-                for i, (f, a) in enumerate(((55, 1.0), (58.3, 0.8), (82.4, 0.6), (110, 0.5), (116.5, 0.35))))
-    braam = np.tanh(chord * 2.5) * env
-    sub = np.sin(2 * np.pi * np.cumsum(70 * np.exp(-t * 2.5) + 28) / sr) * np.exp(-t / 1.1)
-    put(1.60, braam, 0.6)
-    put(1.60, sub, 0.7)
-    put(1.60, dark_hit(110, 1.4, 0.5), 0.5)
-    # uzaktan gelen alçak gürleme kuyruğu
-    tail = lp(rng.standard_normal(int(2.2 * sr)), 60)
-    put(1.70, tail * np.exp(-np.arange(len(tail)) / sr / 0.8) * 4, 0.3)
-
+    # alttaki karanlık uğultu: sürten iki bas, sona doğru kabarır
+    t = tt(total)
+    drone = np.sin(2 * np.pi * 41 * t) + 0.9 * np.sin(2 * np.pi * 43.5 * t) + 0.35 * lp(saw(41, t), 30)
+    drone *= (0.35 + 0.65 * np.clip(t / T_LOCK, 0, 1) ** 2) * np.minimum(1, t / 0.4) * np.clip((total - t) / 1.0, 0, 1)
+    put(0, drone, 0.16)
+    # sürgüler
+    for k, s in enumerate(T_BOLTS):
+        put(s, clack(2100 + k * 180, 1.0), 0.75)
+    # kapı motoru: kaba testere dalga + dişli titreşimi, hidrolik tıslama
+    d = T_DOOR[1] + 0.1
+    t = tt(d)
+    f = 55 + 40 * np.sin(np.minimum(1, t / d) * np.pi)
+    motor = np.tanh(lp(saw(f, t), 4) * 2) * (1 + 0.5 * np.sign(np.sin(2 * np.pi * 22 * t)))
+    motor *= np.minimum(1, t / 0.05) * np.clip((d - t) / 0.08, 0, 1)
+    put(T_DOOR[0], motor, 0.2)
+    ht = tt(0.6)
+    put(T_DOOR[0], hp(rng.standard_normal(len(ht)), 3) * np.exp(-ht / 0.18) * np.minimum(1, ht / 0.02), 0.22)
+    put(T_DOOR[0] + T_DOOR[1], slam(150, 0.45), 0.6)  # kapı dayanır
+    # lamba şalteri ve vızıltısı (titreşimle birlikte)
+    put(T_LAMP - 0.03, clack(1500, 1.4, 0.15), 0.8)
+    t = tt(total - T_LAMP)
+    buzz = lp(np.sign(np.sin(2 * np.pi * 100 * t)) + 0.4 * np.sign(np.sin(2 * np.pi * 150 * t)), 5)
+    level = np.array([_lamp(T_LAMP + x) for x in t[::441]])
+    buzz *= np.repeat(level, 441)[: len(buzz)] * np.clip((total - T_LAMP - t) / 0.8, 0, 1)
+    put(T_LAMP, buzz, 0.05)
+    # her harf yerine çakılırken pres darbesi
+    for i in range(len(WORD)):
+        put(T_LETTER + i * LETTER_GAP + LETTER_FLY, clack(900 + (i % 3) * 70, 1.6, 0.18), 0.55)
+    # son ağır kilitlenme
+    put(T_LOCK, slam(110, 1.4), 1.0)
+    put(T_LOCK, clack(1800, 2.0, 0.2), 0.6)
     peak = np.max(np.abs(out)) or 1
-    A._write(path, np.tanh(out / peak * 1.6) * 0.9)
+    A._write(path, np.tanh(out / peak * 1.5) * 0.9)
     return path
 
 
@@ -157,11 +174,12 @@ class Splash(QWidget):
         self.version = version
         self.sound = sound
         self.clock = clock  # test için sabit zaman verilebilir
-        self.rng = random.Random(5)
         self.t0 = None
         self.timer = QTimer(self, interval=16)
         self.timer.timeout.connect(self._tick)
         self._done = False
+        rnd = random.Random(3)
+        self.dust = [(rnd.uniform(-1, 1), rnd.uniform(-1, 1), rnd.uniform(0.2, 1)) for _ in range(70)]
         scr = QApplication.primaryScreen()
         if scr:
             g = scr.availableGeometry()
@@ -202,9 +220,7 @@ class Splash(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        a = _ease(_p(t, 0, 0.35)) * (1 - _p(t, DURATION - 0.35, 0.35))
-        p.setOpacity(a)
-        # gövde
+        p.setOpacity(_ease(_p(t, 0, 0.25)) * (1 - _p(t, DURATION - 0.3, 0.3)))
         p.setPen(QPen(QColor(60, 48, 40), 1))
         p.setBrush(BG)
         p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), 14, 14)
@@ -212,41 +228,19 @@ class Splash(QWidget):
         clip = QPainterPath()
         clip.addRoundedRect(QRectF(1, 1, w - 2, h - 2), 14, 14)
         p.setClipPath(clip)
-        # ızgara
-        p.setPen(QPen(GRID, 1))
-        for x in range(0, w, 32):
-            p.drawLine(x, 0, x, h)
-        for y in range(0, h, 32):
-            p.drawLine(0, y, w, y)
-        cx, cy = 210, h / 2 - 10
-        # arkadaki turuncu ışık
-        glow = _ease(_p(t, 0.4, 0.9))
-        g = QRadialGradient(QPointF(cx, cy), 260)
-        c0 = QColor(ORANGE)
-        c0.setAlphaF(0.32 * glow)
-        c1 = QColor(ORANGE)
-        c1.setAlphaF(0)
-        g.setColorAt(0, c0)
-        g.setColorAt(1, c1)
-        p.fillRect(0, 0, w, h, g)
-        self._aperture(p, t, cx, cy)
-        self._wordmark(p, t, 400, cy)
-        self._status(p, t, w, h)
-        # tarama çizgisi
-        sp = _p(t, 0.9, 0.7)
-        if 0 < sp < 1:
-            y = sp * h
-            lg = QLinearGradient(0, y - 40, 0, y)
-            c = QColor(ORANGE)
-            c.setAlphaF(0)
-            lg.setColorAt(0, c)
-            c2 = QColor(ORANGE)
-            c2.setAlphaF(0.22)
-            lg.setColorAt(1, c2)
-            p.fillRect(QRectF(0, y - 40, w, 40), lg)
-            p.fillRect(QRectF(0, y, w, 2), ORANGE)
+        # kamera hafifçe sarsılır: kapı dayandığında ve son kilitlenmede
+        shake = 0.0
+        for at, amp in ((T_DOOR[0] + T_DOOR[1], 4), (T_LOCK, 7)):
+            d = t - at
+            if 0 <= d < 0.35:
+                shake += amp * math.exp(-d * 12) * math.sin(d * 90)
+        p.translate(0, shake)
+        self._room(p, t, w, h)
+        self._letters(p, t, w, h)
+        self._door(p, t, w, h)
+        p.translate(0, -shake)
+        self._hud(p, t, w, h)
         p.restore()
-        # köşe işaretleri
         p.setPen(QPen(ORANGE, 3))
         k = 22 * _ease(_p(t, 0.1, 0.4))
         for x, y, dx, dy in ((14, 14, 1, 1), (w - 14, 14, -1, 1), (14, h - 14, 1, -1), (w - 14, h - 14, -1, -1)):
@@ -254,112 +248,192 @@ class Splash(QWidget):
             p.drawLine(QPointF(x, y), QPointF(x, y + dy * k))
         p.end()
 
-    def _aperture(self, p, t, cx, cy):
-        R = 118
-        ring_in = _back(_p(t, 0.05, 0.5))
-        if ring_in <= 0:
-            return
-        p.save()
-        p.translate(cx, cy)
-        p.scale(ring_in, ring_in)
-        # dış halka ve dönen ölçek çizgileri
-        p.setPen(QPen(QColor(70, 58, 50), 10))
-        p.setBrush(Qt.NoBrush)
-        p.drawEllipse(QPointF(0, 0), R + 16, R + 16)
-        rot = t * 40 + _ease(_p(t, 0.3, 0.8)) * 120
-        for i in range(60):
-            ang = math.radians(i * 6 + rot)
-            big = i % 5 == 0
-            r1, r2 = R + 28, R + (40 if big else 34)
-            col = QColor(ORANGE) if big else QColor(MUTED)
-            p.setPen(QPen(col, 2 if big else 1))
-            p.drawLine(QPointF(math.cos(ang) * r1, math.sin(ang) * r1), QPointF(math.cos(ang) * r2, math.sin(ang) * r2))
-        # diyafram kanatları: kapalıdan açığa
-        op = _ease(_p(t, 0.35, 0.75)) * 0.82 - 0.06 * math.sin(_p(t, 0.35, 1.2) * math.pi)
-        hole = max(0.0, op) * R
-        lens = QRadialGradient(QPointF(0, 0), R)
-        lens.setColorAt(0, QColor(255, 170, 90))
-        lens.setColorAt(0.45, ORANGE)
-        lens.setColorAt(1, DEEP.darker(220))
-        p.setPen(Qt.NoPen)
-        p.setBrush(lens)
-        p.drawEllipse(QPointF(0, 0), R, R)
-        clip = QPainterPath()
-        clip.addEllipse(QPointF(0, 0), R, R)
-        p.setClipPath(clip)
-        n = 7
-        for i in range(n):
-            base = i * 2 * math.pi / n + (1 - max(0.0, op)) * 0.9
-            path = QPainterPath()
-            # her kanat, deliğin kenarına teğet geniş bir dörtgen
-            ax, ay = math.cos(base), math.sin(base)
-            tx, ty = -ay, ax
-            p0 = QPointF(ax * hole, ay * hole)
-            path.moveTo(p0)
-            path.lineTo(QPointF(p0.x() + tx * R * 2.2, p0.y() + ty * R * 2.2))
-            path.lineTo(QPointF(p0.x() + tx * R * 2.2 + ax * R * 2, p0.y() + ty * R * 2.2 + ay * R * 2))
-            path.lineTo(QPointF(p0.x() + ax * R * 2, p0.y() + ay * R * 2))
-            path.closeSubpath()
-            shade = 34 + (i % 2) * 8
-            p.setBrush(QColor(shade, shade - 4, shade - 8))
-            p.setPen(QPen(QColor(12, 10, 9), 2))
-            p.drawPath(path)
-        p.setClipping(False)
-        p.setPen(QPen(ORANGE, 3))
-        p.setBrush(Qt.NoBrush)
-        p.drawEllipse(QPointF(0, 0), R, R)
-        p.restore()
+    def _vp(self, w, h):
+        return w / 2, h / 2 - 30
 
-    def _wordmark(self, p, t, x, cy):
-        f = QFont("JetBrains Mono", 40)
+    def _room(self, p, t, w, h):
+        """Perspektif oda: kamera içeri ilerledikçe tavan/zemin/duvar çerçeveleri yaklaşır."""
+        vx, vy = self._vp(w, h)
+        lamp = _lamp(t)
+        # kapı açılınca ilerleme başlar, sonra yavaşlayarak durur
+        travel = _ease(_p(t, T_DOOR[0] + 0.2, T_LOCK - T_DOOR[0])) * 3.2
+        # dipteki karanlık oda lambası
+        if lamp > 0:
+            g = QRadialGradient(QPointF(vx, vy), 420)
+            for stop, a in ((0, 0.55), (0.25, 0.22), (1, 0)):
+                c = QColor(DEEP)
+                c.setAlphaF(a * lamp)
+                g.setColorAt(stop, c)
+            p.fillRect(QRectF(0, 0, w, h), g)
+        rw, rh = 1.25, 0.95  # oda kesiti (görüntüye göre oran)
+        light = 0.25 + 0.75 * lamp
+        frames = []
+        for k in range(12):
+            z = (k * 0.55 - travel) % 6.6 + 0.35
+            frames.append(z)
+        frames.sort(reverse=True)
+        for z in frames:
+            s = 1 / z
+            hw, hh = rw * s * w / 2, rh * s * h / 2
+            fog = max(0.0, min(1.0, 1.6 / z)) * max(0.0, min(1.0, (6.9 - z) / 1.2))
+            c = QColor(ORANGE) if lamp > 0 else QColor(90, 80, 72)
+            c.setAlphaF(0.32 * fog * light)
+            p.setPen(QPen(c, 1.2 + 1.5 * s))
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(QRectF(vx - hw, vy - hh, hw * 2, hh * 2))
+        # köşelerden kaçış noktasına uzanan kenarlar ve zemin çizgileri
+        c = QColor(ORANGE) if lamp > 0 else QColor(90, 80, 72)
+        c.setAlphaF(0.22 * light)
+        p.setPen(QPen(c, 1.2))
+        for fx in (-1, -0.5, 0, 0.5, 1):
+            p.drawLine(QPointF(vx, vy), QPointF(vx + fx * rw * w * 1.4, vy + rh * h * 1.4))
+        for sx, sy in ((-1, -1), (1, -1)):
+            p.drawLine(QPointF(vx, vy), QPointF(vx + sx * rw * w * 1.4, vy + sy * rh * h * 1.4))
+        # havada süzülen toz, lambanın ışığında görünür
+        if lamp > 0:
+            for i, (dx, dy, z0) in enumerate(self.dust):
+                z = (z0 * 3 - travel * 0.8 - t * 0.05) % 3 + 0.2
+                x, y = vx + dx * w * 0.5 / z, vy + dy * h * 0.4 / z
+                c = QColor(255, 170, 110)
+                c.setAlphaF(min(0.5, 0.25 / z) * lamp)
+                p.setPen(Qt.NoPen)
+                p.setBrush(c)
+                p.drawEllipse(QPointF(x, y), 1.2 / z, 1.2 / z)
+        # kenarlar karanlıkta kalır
+        vg = QRadialGradient(QPointF(vx, vy), w * 0.62)
+        vg.setColorAt(0.45, QColor(0, 0, 0, 0))
+        vg.setColorAt(1, QColor(0, 0, 0, 235))
+        p.fillRect(QRectF(0, 0, w, h), vg)
+
+    def _letters(self, p, t, w, h):
+        """Harfler dipteki karanlıktan kamera ilerledikçe öne gelir ve yerine çakılır."""
+        vx, vy = self._vp(w, h)
+        f = QFont("JetBrains Mono", 46)
         f.setWeight(QFont.ExtraBold)
-        f.setLetterSpacing(QFont.AbsoluteSpacing, 4)
         p.setFont(f)
         fm = p.fontMetrics()
-        cw = fm.horizontalAdvance("M") + 4
-        bar = _ease(_p(t, 0.7, 0.35))
-        if bar > 0:
-            p.fillRect(QRectF(x, cy - 52, 10, 66 * bar), ORANGE)
+        cw = fm.horizontalAdvance("M") + 10
+        total = cw * len(WORD) - 10
+        x0, y0 = w / 2 - total / 2, h / 2 + 4
+        lamp = _lamp(t)
         for i, ch in enumerate(WORD):
-            st = 0.85 + i * 0.07
-            if t < st:
+            st = T_LETTER + i * LETTER_GAP
+            q = _p(t, st, LETTER_FLY)
+            if q <= 0:
                 continue
-            settle = st + 0.28
-            if t < settle:
-                ch = GLYPHS[int(t * 40 + i * 7) % len(GLYPHS)]
-                p.setPen(ORANGE)
-            else:
-                p.setPen(TEXT if i < 4 else ORANGE)
-            jitter = (1 - _p(t, st, 0.28)) * 6
-            p.drawText(QPointF(x + 26 + i * cw, cy + jitter), ch)
-        sub = "// PROMPT → VIDEO · animasyon motoru"
-        n = int(len(sub) * _p(t, 1.55, 0.6))
+            e = q ** 2.2  # uzaktan yavaş, yaklaştıkça hızlı: derinlik hissi
+            fx, fy = x0 + i * cw + cw / 2, y0
+            x, y = vx + (fx - vx) * e, vy + (fy - vy) * e
+            sc = 0.06 + 0.94 * e
+            base = TEXT if i < 4 else ORANGE
+            dark = 0.15 + 0.85 * e
+            col = QColor(int(base.red() * dark), int(base.green() * dark), int(base.blue() * dark))
+            p.save()
+            p.translate(x, y)
+            p.scale(sc, sc)
+            # çakıldığı an kısa bir parlama
+            flash = 1 - _p(t, st + LETTER_FLY, 0.18)
+            if q >= 1 and flash > 0:
+                g = QRadialGradient(QPointF(0, -18), 60)
+                c = QColor(ORANGE)
+                c.setAlphaF(0.6 * flash)
+                g.setColorAt(0, c)
+                c2 = QColor(ORANGE)
+                c2.setAlphaF(0)
+                g.setColorAt(1, c2)
+                p.fillRect(QRectF(-60, -80, 120, 120), g)
+            # lambanın sıcak yansıması: harfin altına turuncu bir hale
+            if lamp > 0 and q >= 1:
+                p.setPen(QColor(255, 90, 20, int(70 * lamp)))
+                p.drawText(QPointF(-fm.horizontalAdvance(ch) / 2, 3), ch)
+            p.setPen(col)
+            p.drawText(QPointF(-fm.horizontalAdvance(ch) / 2, 0), ch)
+            p.restore()
+        # son kilitlenmede alt çizgi ve slogan
+        lk = _ease(_p(t, T_LOCK, 0.3))
+        if lk > 0:
+            p.fillRect(QRectF(w / 2 - total / 2 * lk, y0 + 18, total * lk, 4), ORANGE)
+        sub = "// PROMPT → VIDEO · veri destekli animasyon motoru"
+        n = int(len(sub) * _p(t, T_LOCK + 0.1, 0.5))
         if n:
-            f2 = QFont("JetBrains Mono", 11)
-            p.setFont(f2)
+            p.setFont(QFont("JetBrains Mono", 11))
             p.setPen(MUTED)
-            cursor = "▌" if n < len(sub) or int(t * 3) % 2 == 0 else ""
-            p.drawText(QPointF(x + 28, cy + 40), sub[:n] + cursor)
+            fm2 = p.fontMetrics()
+            p.drawText(QPointF(w / 2 - fm2.horizontalAdvance(sub) / 2, y0 + 50), sub[:n])
 
-    def _status(self, p, t, w, h):
-        f = QFont("JetBrains Mono", 10)
-        p.setFont(f)
-        y0 = h - 104
-        for i, ln in enumerate(LINES):
-            st = 0.6 + i * 0.38
-            if t < st:
+    def _door(self, p, t, w, h):
+        """Perçinli, uyarı şeritli iki kanatlı çelik kapı; sürgüler çekilir, kanatlar yana kayar."""
+        op = _ease_in_out(_p(t, T_DOOR[0], T_DOOR[1]))
+        if op >= 1:
+            return
+        half = w / 2
+        for side in (-1, 1):
+            off = op * half * 1.05 * side
+            x = (0 if side < 0 else half) + off
+            rect = QRectF(x, 0, half, h)
+            g = QLinearGradient(rect.left(), 0, rect.right(), 0)
+            g.setColorAt(0, QColor(30, 27, 25) if side < 0 else QColor(44, 40, 37))
+            g.setColorAt(1, QColor(44, 40, 37) if side < 0 else QColor(30, 27, 25))
+            p.fillRect(rect, g)
+            # yatay panel çizgileri ve perçinler
+            p.setPen(QPen(QColor(18, 16, 15), 2))
+            for yy in (h * 0.25, h * 0.5, h * 0.75):
+                p.drawLine(QPointF(rect.left() + 20, yy), QPointF(rect.right() - 20, yy))
+            p.setPen(Qt.NoPen)
+            for yy in range(30, h, 40):
+                for xx in (rect.left() + 22, rect.right() - 22):
+                    p.setBrush(QColor(70, 63, 58))
+                    p.drawEllipse(QPointF(xx, yy), 3.2, 3.2)
+                    p.setBrush(QColor(20, 18, 16))
+                    p.drawEllipse(QPointF(xx + 1, yy + 1), 1.6, 1.6)
+            # birleşim kenarında uyarı şeridi
+            ex = rect.right() - 26 if side < 0 else rect.left()
+            p.save()
+            p.setClipRect(QRectF(ex, 0, 26, h))
+            p.fillRect(QRectF(ex, 0, 26, h), QColor(20, 18, 16))
+            p.setBrush(ORANGE)
+            for yy in range(-40, h + 40, 28):
+                path = QPainterPath()
+                path.moveTo(ex, yy)
+                path.lineTo(ex + 26, yy - 14)
+                path.lineTo(ex + 26, yy - 2)
+                path.lineTo(ex, yy + 12)
+                path.closeSubpath()
+                p.drawPath(path)
+            p.restore()
+            # kapı üstündeki yazı
+            p.setFont(QFont("JetBrains Mono", 13, QFont.Bold))
+            p.setPen(QColor(120, 108, 98))
+            label = "DARK" if side < 0 else "ROOM"
+            fm = p.fontMetrics()
+            lx = rect.right() - 60 - fm.horizontalAdvance(label) if side < 0 else rect.left() + 60
+            p.drawText(QPointF(lx, h * 0.5 + 40), label)
+        # sürgüler: kapının ortasından yana çekilir
+        if op <= 0:
+            for yy, at in zip((h * 0.25, h * 0.5, h * 0.75), T_BOLTS):
+                pull = _ease(_p(t, at, 0.1))
+                bx = half - 46
+                p.fillRect(QRectF(bx - pull * 60, yy - 9, 92, 18), QColor(88, 80, 74))
+                p.fillRect(QRectF(bx - pull * 60, yy - 9, 92, 3), QColor(130, 120, 110))
+                p.setBrush(ORANGE if pull >= 1 else QColor(160, 40, 20))
+                p.setPen(Qt.NoPen)
+                p.drawEllipse(QPointF(half - 80, yy - 22), 4, 4)  # durum ışığı: kırmızı → turuncu
+
+    def _hud(self, p, t, w, h):
+        p.setFont(QFont("JetBrains Mono", 10))
+        y0 = h - 92
+        for i, (ln, at) in enumerate(zip(LINES, (T_BOLTS[-1] + 0.1, T_LAMP + 0.1, T_LOCK))):
+            if t < at:
                 continue
             p.setPen(MUTED)
-            p.drawText(QPointF(410, y0 + i * 18), ln)
-            if t > st + 0.25:
+            p.drawText(QPointF(40, y0 + i * 18), ln)
+            if t > at + 0.2:
                 p.setPen(ORANGE)
-                p.drawText(QPointF(640, y0 + i * 18), "[ OK ]")
-        # ilerleme çubuğu
-        pr = _ease(_p(t, 0.2, DURATION - 0.8))
-        bx, by, bw = 40, h - 30, w - 80
-        p.fillRect(QRectF(bx, by, bw, 4), GRID)
-        p.fillRect(QRectF(bx, by, bw * pr, 4), ORANGE)
-        p.setPen(MUTED)
-        p.drawText(QPointF(bx, by - 10), f"SİSTEM HAZIRLANIYOR  {int(pr * 100):3d}%")
+                p.drawText(QPointF(290, y0 + i * 18), "[ OK ]")
+        pr = _ease(_p(t, 0.1, T_LOCK))
+        bx, by, bw = 40, h - 26, w - 80
+        p.fillRect(QRectF(bx, by, bw, 3), GRID)
+        p.fillRect(QRectF(bx, by, bw * pr, 3), ORANGE)
         if self.version:
-            p.drawText(QRectF(bx, by - 24, bw, 18), Qt.AlignRight | Qt.AlignVCenter, f"v{self.version}")
+            p.setPen(MUTED)
+            p.drawText(QRectF(bx, by - 22, bw, 18), Qt.AlignRight | Qt.AlignVCenter, f"v{self.version}")
