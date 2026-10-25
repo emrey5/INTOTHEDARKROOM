@@ -78,11 +78,6 @@ PRESETS = {
 STYLE_SAMPLE = {"type": "bar", "kicker": "Örnek", "title": "Stil önizlemesi", "unit": "",
                 "data": [{"label": "Birinci", "value": 9}, {"label": "İkinci", "value": 6}, {"label": "Üçüncü", "value": 4}],
                 "narration": "Altyazı böyle görünecek.", "duration": 8}
-EXAMPLES = [
-    "Türkiye'nin nüfusu 1960'tan bugüne nasıl değişti?",
-    "Avrupa'da enflasyon: Türkiye, Almanya, Fransa karşılaştırması",
-    "Kahvenin dünyaya yayılış hikâyesi",
-]
 SAMPLE_SCENES = {
     "title": {"type": "title", "title": "Örnek Başlık", "subtitle": "Alt başlık burada"},
     "bullets": {"type": "bullets", "kicker": "Öne çıkanlar", "title": "Başlık", "items": ["Birinci madde", "İkinci madde"]},
@@ -668,12 +663,6 @@ class MainWindow(QMainWindow):
         self.prompt.setFixedHeight(96)
         self.prompt.setPlainText(self.settings.value("prompt", ""))
         v.addWidget(self.prompt)
-        for ex in EXAMPLES:
-            b = QPushButton("↳ " + ex, objectName="chip")
-            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-            b.setToolTip(ex)
-            b.clicked.connect(lambda _=False, e=ex: self.prompt.setPlainText(e))
-            v.addWidget(b)
 
         v.addWidget(self._section("Hazır stiller"))
         g = QGridLayout()
@@ -838,16 +827,6 @@ class MainWindow(QMainWindow):
             b.setToolTip(kinds.KINDS[b.property("key")]["desc"])
         self._kind_locked = False
         self.kind_sel.buttonClicked.connect(self._on_kind_clicked)
-        ex = QHBoxLayout()
-        for e in ("Shorts için kısa bir video: Kahvenin dünyaya yayılış hikâyesi",
-                  "Osmanlı İmparatorluğu'nun yükselişi, detaylı",
-                  "Avrupa'da enflasyon: Türkiye, Almanya, Fransa"):
-            b = QPushButton("↳ " + e, objectName="chip")
-            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-            b.setToolTip(e)
-            b.clicked.connect(lambda _=False, t=e: self.simple_prompt.setPlainText(t))
-            ex.addWidget(b)
-        v.addLayout(ex)
         self.auto_info = QLabel("", objectName="status")
         self.auto_info.setWordWrap(True)
         v.addWidget(self.auto_info)
