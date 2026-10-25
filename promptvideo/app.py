@@ -1260,8 +1260,16 @@ def run_app():
     if os.path.exists(icon):
         app.setWindowIcon(QIcon(icon))
     app.setStyleSheet(app_stylesheet())
-    w = MainWindow()
-    w.show()
+    if os.environ.get("PV_NO_SPLASH"):
+        w = MainWindow()
+        w.show()
+        return app.exec()
+    from .splash import Splash
+    sp = Splash(__version__, sound=not os.environ.get("PV_SPLASH_MUTE"))
+    sp.start()
+    app.processEvents()
+    w = MainWindow()  # açılış efekti oynarken ana pencere arkada hazırlanır
+    sp.finished.connect(w.show)
     return app.exec()
 
 

@@ -111,6 +111,7 @@ lab, nature), `versus`, `people` (piktogram), `map` (`world` ya da `turkey`), `t
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama adresi |
 | `PV_VOICE` | `tr-TR-AhmetNeural` | Ses |
 | `PV_PRESET` / `PV_CRF` | `medium` / `19` | Kodlama hızı / kalitesi (düşük CRF = daha kaliteli, büyük dosya) |
+| `PV_NO_SPLASH` / `PV_SPLASH_MUTE` | boş | `1` yapılırsa açılış efekti hiç gösterilmez / sessiz oynar |
 | `PV_STYLE` | `mekanik` | Komut satırındaki varsayılan görünüm (`mekanik` / `cizgi` / `modern`); `--style` ile de seçilir |
 
 ## Sınırlar
