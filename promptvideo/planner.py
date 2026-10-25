@@ -73,8 +73,12 @@ Yalnızca şu şemaya uyan JSON döndür:
 LENGTHS = {"kisa": ("4-5", 5), "orta": ("6-9", 9), "uzun": ("10-14", 14)}
 
 
-def system_prompt(length="orta"):
-    return SYSTEM_T.replace("{n_scenes}", LENGTHS.get(length, LENGTHS["orta"])[0])
+def system_prompt(length="orta", kind=None):
+    from .kinds import KINDS
+    s = SYSTEM_T.replace("{n_scenes}", LENGTHS.get(length, LENGTHS["orta"])[0])
+    if kind in KINDS:  # video türünün talimatı genel kuralların önüne geçer
+        s += "\n\nVİDEO TÜRÜ (diğer kurallardan önce gelir): " + KINDS[kind]["hint"]
+    return s
 
 
 def extract_json(text):
@@ -93,12 +97,12 @@ def ollama_available():
         return False, []
 
 
-def plan_with_ollama(prompt, findings, lang="tr", log=print, length="orta"):
+def plan_with_ollama(prompt, findings, lang="tr", log=print, length="orta", kind=None):
     log(f"  [ollama] {MODEL} senaryoyu yazıyor (birkaç dakika sürebilir)…")
     r = requests.post(f"{OLLAMA}/api/chat", timeout=1800, json={
         "model": MODEL, "stream": False, "format": "json", "think": False,
         "options": {"temperature": 0.4, "num_ctx": 16384},
-        "messages": [{"role": "system", "content": system_prompt(length)},
+        "messages": [{"role": "system", "content": system_prompt(length, kind)},
                      {"role": "user", "content": f"İSTEK: {prompt}\n\nARAŞTIRMA NOTLARI:\n{R.notes(findings)}"}]})
     r.raise_for_status()
     plan = extract_json(r.json()["message"]["content"])
@@ -264,8 +268,13 @@ def _fmt(v, unit):
     return f"{s} {unit}".strip()
 
 
-def make_plan(prompt, lang="tr", log=print, length="orta", findings=None):
-    """Senaryoyu yazar. findings verilmezse önce araştırma yapılır."""
+def make_plan(prompt, lang="tr", log=print, length="orta", findings=None, kind=None):
+    """Senaryoyu yazar ve video türüne uydurur. findings verilmezse önce araştırma yapılır."""
+    from .kinds import apply
+    return apply(_make_plan(prompt, lang, log, length, findings, kind), kind, prompt)
+
+
+def _make_plan(prompt, lang="tr", log=print, length="orta", findings=None, kind=None):
     if findings is None:
         findings = R.gather(prompt, lang, log)
     ok, names = ollama_available()
@@ -276,7 +285,7 @@ def make_plan(prompt, lang="tr", log=print, length="orta", findings=None):
     if ok:
         log(f"Yerel yapay zekâ ({MODEL}) senaryoyu yazıyor…")
         try:
-            plan = plan_with_ollama(prompt, findings, lang, log, length)
+            plan = plan_with_ollama(prompt, findings, lang, log, length, kind)
             if plan.get("scenes"):
                 return plan
         except Exception as e:

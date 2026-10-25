@@ -15,7 +15,11 @@ from .render import render_scene, concat
 
 MIN_DUR = {"title": 5, "bullets": 7, "stat": 5, "bar": 7, "line": 8, "pie": 7, "table": 7,
            "image": 5, "video": 5, "outro": 5, "character": 5, "versus": 7, "people": 7, "map": 8,
-           "timeline": 9, "compare": 7}
+           "timeline": 9, "compare": 7, "kinetic": 4}
+
+
+# tempo: seslendirme hızı, sahne sonundaki nefes payı (sn), en kısa süre çarpanı
+TEMPO = {"yavas": ("-8%", 1.8, 1.15), "normal": ("+0%", 1.2, 1.0), "hizli": ("+12%", 0.7, 0.85)}
 
 
 class Callbacks:
@@ -127,7 +131,7 @@ def load_findings(out_dir):
     return None
 
 
-def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta"):
+def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta", kind=None):
     """Seçili bulgulardan senaryoyu yazar, sayıları doğrular, out_dir/plan.json olarak kaydeder."""
     global _cb
     _cb = cb or Callbacks()
@@ -135,7 +139,7 @@ def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta"):
     from .factcheck import check_plan
     os.makedirs(out_dir, exist_ok=True)
     _cb.stage(1, 5, "Senaryo yazılıyor")
-    plan = make_plan(prompt, lang, log, length, findings)
+    plan = make_plan(prompt, lang, log, length, findings, kind)
     plan.setdefault("prompt", prompt)
     chk = check_plan(plan, findings)
     if chk:
@@ -149,23 +153,31 @@ def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta"):
     return plan
 
 
-def create_plan(prompt, out_dir, lang="tr", cb=None, length="orta"):
+def create_plan(prompt, out_dir, lang="tr", cb=None, length="orta", kind=None):
     """Araştırma + senaryo tek adımda (komut satırı için)."""
     findings = research_topic(prompt, out_dir, lang, cb)
-    return write_plan(prompt, findings, out_dir, lang, cb, length)
+    return write_plan(prompt, findings, out_dir, lang, cb, length, kind)
 
 
 def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=False, lang="tr", cb=None,
-                preview_every=10, subtitles=False, sfx=True, vertical=False):
+                preview_every=10, subtitles=False, sfx=True, vertical=False, square=False, quality="1080",
+                fps=30, tempo="normal", accent=None, bg=None, sub_opts=None, music_vol=0.35):
     """Planı videoya çevirir; video yolunu döner.
-    music: ses dosyası yolu ya da "auto:enerjik" / "auto:sakin" / "auto:gizemli" (program üretir)."""
+    music: ses dosyası yolu ya da "auto:enerjik" / "auto:sakin" / "auto:gizemli" (program üretir).
+    quality: "720" / "1080" / "1440" / "2160"; tempo: "yavas" / "normal" / "hizli";
+    accent / bg: "#RRGGBB" ile stil renklerini değiştirir; sub_opts: altyazı boyut/konum/kutu."""
     global _cb
     _cb = cb or Callbacks()
     from . import theme
     from . import draw as D
     t0 = time.time()
-    theme.apply_style(style or plan.get("style") or theme.STYLE)
+    theme.apply_style(style or plan.get("style") or theme.STYLE, accent=accent or "", bg=bg or "")
+    theme.set_output(quality, fps)
     D._paper = None  # stil değişince kâğıt dokusunu yeniden üret
+    D.SUB_OPTS = dict(D.SUB_OPTS, **(sub_opts or {}))
+    rate, pad, min_k = TEMPO.get(tempo, TEMPO["normal"])
+    ow, oh = theme.out_size()
+    log(f"Çıktı: {ow}x{oh}, {theme.FPS} fps, stil {theme.STYLE_NAMES.get(theme.STYLE, theme.STYLE)}")
     lang = plan.get("language", lang)
     scenes.LANG = lang
     sc_list = copy.deepcopy(plan["scenes"])
@@ -193,18 +205,19 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
             parts = []
             for k, ln in enumerate(lines):
                 who = min(int(ln.get("who", 0)), len(voices) - 1)
-                parts.append(tts.synthesize(ln["text"], os.path.join(assets, f"voice_{i:02}_{k}.mp3"), lang, voices[who]))
+                parts.append(tts.synthesize(ln["text"], os.path.join(assets, f"voice_{i:02}_{k}.mp3"), lang,
+                                            voices[who], rate))
             if all(parts):
                 try:
                     audio, sc["_line_times"] = tts.join(parts, os.path.join(assets, f"voice_{i:02}.wav"))
                 except Exception as e:
                     log(f"  [ses] replikler birleştirilemedi: {e}")
         elif not no_voice and sc.get("narration"):
-            audio = tts.synthesize(sc["narration"], os.path.join(assets, f"voice_{i:02}.mp3"), lang, voice)
+            audio = tts.synthesize(sc["narration"], os.path.join(assets, f"voice_{i:02}.mp3"), lang, voice, rate)
         sc["_audio"] = audio
         alen = tts.duration(audio) if audio else 0
         sc["_speech"], sc["_subs"] = alen, subtitles
-        sc["duration"] = max(float(sc.get("duration") or 0), MIN_DUR.get(sc["type"], 6), alen + 1.2)
+        sc["duration"] = max(float(sc.get("duration") or 0), MIN_DUR.get(sc["type"], 6) * min_k, alen + pad)
         _cb.progress((i + 1) / len(sc_list))
 
     _cb.stage(4, 5, "Animasyonlar çiziliyor")
@@ -241,7 +254,7 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
         mood = music.split(":", 1)[1]
         log(f"Müzik üretiliyor ({A.MOODS.get(mood, mood)})…")
         music = A.build_music(mood, total, os.path.join(assets, "muzik.wav"))
-    concat(parts, out, music, sfx_path)
+    concat(parts, out, music, sfx_path, music_vol)
     with open(os.path.join(out_dir, "altyazi.srt"), "w", encoding="utf-8") as f:
         f.write("\n".join(srt))
     from . import publish
@@ -254,6 +267,9 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
     if vertical:
         log("Dikey (Shorts) sürüm hazırlanıyor…")
         publish.vertical(out, os.path.join(out_dir, "video_dikey.mp4"), plan.get("title", ""))
+    if square:
+        log("Kare (1:1) sürüm hazırlanıyor…")
+        publish.square(out, os.path.join(out_dir, "video_kare.mp4"), plan.get("title", ""))
     for p in parts:
         try:
             os.remove(p)

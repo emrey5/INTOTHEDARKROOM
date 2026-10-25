@@ -8,7 +8,7 @@ import cairo
 from . import characters as C
 from . import draw as D
 from . import theme as th
-from .render import FFMPEG, ENC, AUD, _NOWIN
+from .render import FFMPEG, AUD, _NOWIN, enc
 from .theme import fmt_num
 
 
@@ -147,6 +147,37 @@ def vertical(video, path, title):
           f"eq=brightness=-0.25[bg];[0:v]scale={ow}:{vh}[fg];[bg][fg]overlay=0:{(oh - vh) // 2}[v1];"
           f"[v1][1:v]overlay=0:0[v]")
     subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-i", video, "-i", over, "-filter_complex", fc,
-                    "-map", "[v]", "-map", "0:a", *ENC, *AUD, "-movflags", "+faststart", path], check=True, **_NOWIN)
+                    "-map", "[v]", "-map", "0:a", *enc(), *AUD, "-movflags", "+faststart", path], check=True, **_NOWIN)
+    os.remove(over)
+    return path
+
+
+def square(video, path, title):
+    """1:1 sürüm (Instagram gönderisi): bulanık arka plan, ortada video, üstte başlık."""
+    ow = oh = 1080
+    over = path + ".ust.png"
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, ow, oh)
+    ctx = cairo.Context(surf)
+    size = 56
+    lines = D.wrap(title, size, ow - 120, "display")
+    while len(lines) > 2 and size > 38:
+        size -= 4
+        lines = D.wrap(title, size, ow - 120, "display")
+    vh = ow * 9 // 16
+    top = (oh - vh) // 2
+    y = top - 40 - (len(lines[:2]) - 1) * size * 1.1
+    for i, ln in enumerate(lines[:2]):
+        D.draw_text(ctx, ln, 60 + 3, y + i * size * 1.1 + 3, size, (0, 0, 0), alpha=0.7, kind="display")
+        D.draw_text(ctx, ln, 60, y + i * size * 1.1, size, th.TEXT, kind="display")
+    ctx.set_source_rgb(*th.ACCENT)
+    ctx.rectangle(60, top + vh + 34, 120, 8)
+    ctx.fill()
+    D.draw_text(ctx, "DARKROOM", ow - 60, top + vh + 70, 26, th.ACCENT, kind="bold", align="right")
+    surf.write_to_png(over)
+    fc = (f"[0:v]scale={ow}:{oh}:force_original_aspect_ratio=increase,crop={ow}:{oh},boxblur=30:3,"
+          f"eq=brightness=-0.3[bg];[0:v]scale={ow}:{vh}[fg];[bg][fg]overlay=0:{top}[v1];"
+          f"[v1][1:v]overlay=0:0[v]")
+    subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-i", video, "-i", over, "-filter_complex", fc,
+                    "-map", "[v]", "-map", "0:a", *enc(), *AUD, "-movflags", "+faststart", path], check=True, **_NOWIN)
     os.remove(over)
     return path

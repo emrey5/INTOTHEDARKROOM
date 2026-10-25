@@ -11,16 +11,17 @@ import sys
 import threading
 
 from PySide6.QtCore import Qt, QThread, Signal, QSettings, QUrl, QSize, QTimer
-from PySide6.QtGui import QImage, QPixmap, QDesktopServices, QIcon, QFont, QFontDatabase
+from PySide6.QtGui import QImage, QPixmap, QDesktopServices, QIcon, QFont, QFontDatabase, QColor
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QLabel,
     QPlainTextEdit, QPushButton, QComboBox, QLineEdit, QFileDialog, QProgressBar, QTabWidget,
     QListWidget, QListWidgetItem, QFrame, QMessageBox, QSplitter, QSizePolicy, QCheckBox,
-    QFormLayout, QDoubleSpinBox, QToolButton, QScrollArea, QButtonGroup, QInputDialog, QStackedWidget)
+    QFormLayout, QDoubleSpinBox, QToolButton, QScrollArea, QButtonGroup, QInputDialog, QStackedWidget,
+    QSlider, QDialog, QColorDialog, QDialogButtonBox, QAbstractItemView)
 
 from . import theme, pipeline, planner, scenes, updater, userdata, __version__
 from .waitscreen import WaitScreen
-from . import ollama_setup
+from . import ollama_setup, autoset, kinds
 from . import draw as D
 from .render import render_frame
 
@@ -32,15 +33,51 @@ SCENE_TYPES = {
     "line": "Çizgi grafik", "pie": "Pasta grafik", "table": "Tablo", "image": "Görsel",
     "video": "Video klip", "character": "Karakter konuşur", "versus": "Karşılaştırma (VS)",
     "people": "İnsan piktogramı", "map": "Harita", "timeline": "Zaman çizelgesi",
-    "compare": "Önce / sonra", "outro": "Kapanış",
+    "compare": "Önce / sonra", "kinetic": "Kinetik yazı", "outro": "Kapanış",
 }
 SCENE_ICONS = {"title": "✦", "bullets": "☰", "stat": "#", "bar": "▤", "line": "📈", "pie": "◔",
                "table": "▦", "image": "🖼", "video": "🎬", "character": "☺", "versus": "⚔",
-               "people": "☷", "map": "🗺", "timeline": "⏱", "compare": "⇄", "outro": "★"}
-VOICES = [("Ahmet (erkek)", "tr-TR-AhmetNeural"), ("Emel (kadın)", "tr-TR-EmelNeural"),
-          ("Sessiz", "")]
+               "people": "☷", "map": "🗺", "timeline": "⏱", "compare": "⇄", "kinetic": "Aa", "outro": "★"}
+VOICES_BY_LANG = {
+    "tr": [("Ahmet (erkek)", "tr-TR-AhmetNeural"), ("Emel (kadın)", "tr-TR-EmelNeural"), ("Sessiz", "")],
+    "en": [("Andrew (erkek)", "en-US-AndrewNeural"), ("Ava (kadın)", "en-US-AvaNeural"),
+           ("Ryan (erkek, İngiliz)", "en-GB-RyanNeural"), ("Sonia (kadın, İngiliz)", "en-GB-SoniaNeural"), ("Sessiz", "")],
+}
+VOICES = VOICES_BY_LANG["tr"]
 MUSIC_MODES = [("Yok", ""), ("Otomatik · Sakin", "auto:sakin"), ("Otomatik · Enerjik", "auto:enerjik"),
-               ("Otomatik · Gizemli", "auto:gizemli"), ("Kendi dosyam…", "file")]
+               ("Otomatik · Gizemli", "auto:gizemli"), ("Otomatik · Epik", "auto:epik"),
+               ("Otomatik · Gerilim", "auto:gerilim"), ("Otomatik · Retro (8-bit)", "auto:retro"),
+               ("Kendi dosyam…", "file")]
+# videodaki vurgu ve arka plan renkleri ("" = stilin kendi rengi)
+ACCENT_SWATCHES = [("", "Stilin rengi"), ("#FF7A1A", "Turuncu"), ("#3D8BFF", "Mavi"), ("#2ED47A", "Yeşil"),
+                   ("#9B6BFF", "Mor"), ("#FF3B4E", "Kırmızı"), ("#E0B04A", "Altın"), ("#FF5CA8", "Pembe"),
+                   ("#00C2C7", "Turkuaz")]
+BG_SWATCHES = [("", "Stilin arka planı"), ("#050505", "Siyah"), ("#0A1230", "Lacivert"), ("#0B1A12", "Koyu yeşil"),
+               ("#1A0E1F", "Mürdüm"), ("#1C1C1E", "Antrasit"), ("#F6F5F1", "Beyaz"), ("#FBF3E4", "Krem")]
+# hazır stiller: tek tıkla birden çok ayarı birlikte değiştirir
+PRESETS = {
+    "belgesel": ("BELGESEL", "Altın vurgu, sakin müzik, ağır tempo, alt yazı",
+                 dict(style="belgesel", accent="", bg="", music_mode="auto:sakin", tempo="yavas", subs="1",
+                      sub_size="orta", sub_box="kutu", sfx="1", vertical="0", square="0")),
+    "haber": ("HABER", "Lacivert-kırmızı, enerjik müzik, net altyazı",
+              dict(style="haber", accent="", bg="", music_mode="auto:enerjik", tempo="normal", subs="1",
+                   sub_size="orta", sub_box="vurgu", sfx="1", vertical="0", square="0")),
+    "sosyal": ("SOSYAL", "Kısa, hızlı, büyük altyazı, dikey ve kare sürüm",
+               dict(style="modern", accent="#FF5CA8", bg="", music_mode="auto:enerjik", tempo="hizli", subs="1",
+                    sub_size="buyuk", sub_box="vurgu", length="kisa", sfx="1", vertical="1", square="1")),
+    "minimal": ("MİNİMAL", "Açık zemin, tek renk, sade, efektsiz",
+                dict(style="minimal", accent="", bg="", music_mode="auto:sakin", tempo="normal", subs="1",
+                     sub_size="orta", sub_box="golge", sfx="0", vertical="0", square="0")),
+    "darkroom": ("DARKROOM", "Siyah-turuncu, mekanik, gizemli müzik",
+                 dict(style="mekanik", accent="", bg="", music_mode="auto:gizemli", tempo="normal", subs="1",
+                      sub_size="orta", sub_box="kutu", sfx="1", vertical="0", square="0")),
+    "cizgi": ("ÇİZGİ FİLM", "Kâğıt üstüne elle çizim, neşeli ve enerjik",
+              dict(style="cizgi", accent="", bg="", music_mode="auto:enerjik", tempo="normal", subs="1",
+                   sub_size="orta", sub_box="kutu", sfx="1", vertical="0", square="0")),
+}
+STYLE_SAMPLE = {"type": "bar", "kicker": "Örnek", "title": "Stil önizlemesi", "unit": "",
+                "data": [{"label": "Birinci", "value": 9}, {"label": "İkinci", "value": 6}, {"label": "Üçüncü", "value": 4}],
+                "narration": "Altyazı böyle görünecek.", "duration": 8}
 EXAMPLES = [
     "Türkiye'nin nüfusu 1960'tan bugüne nasıl değişti?",
     "Avrupa'da enflasyon: Türkiye, Almanya, Fransa karşılaştırması",
@@ -73,104 +110,152 @@ SAMPLE_SCENES = {
                             {"year": "2000", "text": "Üçüncü olay"}]},
     "compare": {"type": "compare", "kicker": "Önce / sonra", "title": "Başlık", "unit": "",
                 "before": {"label": "2000", "value": 10, "text": ""}, "after": {"label": "2024", "value": 25, "text": ""}},
+    "kinetic": {"type": "kinetic", "kicker": "Biliyor muydunuz?", "narration": "Kahve 15. yüzyılda Yemen'de içilmeye başlandı."},
     "outro": {"type": "outro", "title": "İzlediğiniz için teşekkürler", "sources": []},
 }
-COMMON_KEYS = ("type", "kicker", "title", "narration", "duration")
+COMMON_KEYS = ("type", "kicker", "title", "narration", "duration", "accent")
 
-# Arayüz teması: mekanik, derin siyah tonlar + turuncu vurgu
-C = dict(
-    bg="#050505", panel="#0B0B0B", panel2="#111111", field="#070707", line="#1F1F1F", line2="#2B2B2B",
-    text="#E6DED3", muted="#7D746A", dim="#4A443E", orange="#FF7A1A", orange2="#FF9A3D", orange3="#B84E00",
-    warn="#FF4D1A",
-)
+# Arayüz teması: mekanik, derin siyah tonlar + turuncu vurgu (Ayarlar'dan açık tema ve başka vurgu seçilebilir)
+APP_ACCENTS = {"turuncu": "#FF7A1A", "mavi": "#3D8BFF", "yesil": "#2ED47A", "mor": "#9B6BFF", "kirmizi": "#FF3B4E",
+               "altin": "#E0B04A"}
+PALETTES = {
+    "koyu": dict(
+        bg="#050505", panel="#0B0B0B", panel2="#111111", field="#070707", line="#1F1F1F", line2="#2B2B2B",
+        text="#E6DED3", muted="#7D746A", dim="#4A443E", warn="#FF4D1A", deep="#000000", shadow="#000000",
+        btn1="#232323", btn2="#1A1A1A", btn3="#121212", btn4="#0A0A0A", btnb="#2E2E2E", btnt="#3A3A3A",
+        press1="#050505", press2="#141414", disbg="#0C0C0C", disb="#191919", disb2="#1C1C1C", disl="#2A2A2A",
+        pri1="#262626", pri2="#1B1B1B", pri3="#111111", pri4="#080808", handle="#262626", seltext="#000000",
+        dangerb="#4A1A08", hi="#FFFFFF", tile=True),
+    "acik": dict(
+        bg="#F2F0EB", panel="#FAF9F6", panel2="#FFFFFF", field="#FFFFFF", line="#DDD8CE", line2="#CFC9BD",
+        text="#1E1B18", muted="#6F675D", dim="#ABA397", warn="#D8341A", deep="#FFFFFF", shadow="#BDB6AA",
+        btn1="#FFFFFF", btn2="#FAF8F4", btn3="#F1EEE8", btn4="#E7E3DB", btnb="#CFC9BD", btnt="#FFFFFF",
+        press1="#E2DDD3", press2="#EEEAE3", disbg="#EEEBE5", disb="#DDD8CE", disb2="#DDD8CE", disl="#CFC9BD",
+        pri1="#FFFFFF", pri2="#FBF9F5", pri3="#F3F0EA", pri4="#EAE6DE", handle="#CFC9BD", seltext="#FFFFFF",
+        dangerb="#F0B8A8", hi="#1E1B18", tile=False),
+}
+C = {}
+
+
+def _hex_mix(c1, c2, x):
+    a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(p + (q - p) * x):02X}" for p, q in zip(a, b))
+
+
+def set_app_theme(mode="koyu", accent="turuncu"):
+    """Arayüz renklerini hazırlar (koyu / açık, vurgu rengi)."""
+    pal = PALETTES.get(mode, PALETTES["koyu"])
+    acc = APP_ACCENTS.get(accent, accent if str(accent).startswith("#") else APP_ACCENTS["turuncu"])
+    C.clear()
+    C.update(pal, mode=mode, orange=acc, orange2=_hex_mix(acc, "#FFFFFF", 0.25), orange3=_hex_mix(acc, pal["bg"], 0.35))
+    for k, x in (("tint1", 0.07), ("tint2", 0.05), ("tint3", 0.04), ("tint4", 0.10), ("tint5", 0.08)):
+        C[k] = _hex_mix(pal["bg"], acc, x)
+
+
+set_app_theme()
+
 QSS = """
 * { font-family: 'Inter', 'Segoe UI', sans-serif; font-size: 14px; color: %(text)s; }
-QMainWindow { background: %(bg)s; }
-QWidget#root { background-color: %(bg)s; background-image: url(%(tile)s); }
+QMainWindow, QDialog { background: %(bg)s; }
+QWidget#root { background-color: %(bg)s; %(tile_rule)s }
 QFrame#side { background: %(panel)s; border-right: 1px solid %(line)s; }
 QLabel#brand { font-family: 'JetBrains Mono'; font-size: 21px; font-weight: 800; color: %(orange)s; letter-spacing: 2px; }
 QLabel#brandsub { font-family: 'JetBrains Mono'; color: %(muted)s; font-size: 11px; }
 QLabel[class="section"] { font-family: 'JetBrains Mono'; color: %(orange)s; font-size: 11px; font-weight: 700;
     letter-spacing: 2px; margin-top: 12px; padding-bottom: 2px; border-bottom: 1px solid %(line)s; }
 QPlainTextEdit, QLineEdit, QComboBox, QDoubleSpinBox, QListWidget {
-    background: %(field)s; border: 1px solid %(line2)s; border-top: 1px solid #000000; border-radius: 3px;
-    padding: 8px; selection-background-color: %(orange)s; selection-color: #000000; }
+    background: %(field)s; border: 1px solid %(line2)s; border-top: 1px solid %(shadow)s; border-radius: 3px;
+    padding: 8px; selection-background-color: %(orange)s; selection-color: %(seltext)s; }
 QPlainTextEdit:focus, QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus { border: 1px solid %(orange)s; }
 QComboBox::drop-down { border: none; width: 26px; }
 QComboBox::down-arrow { image: url(%(arrow_down)s); width: 12px; height: 12px; margin-right: 8px; }
 QDoubleSpinBox::up-arrow { image: url(%(arrow_up)s); width: 10px; height: 10px; }
 QDoubleSpinBox::down-arrow { image: url(%(arrow_down)s); width: 10px; height: 10px; }
 QComboBox QAbstractItemView { background: %(panel2)s; border: 1px solid %(orange3)s; outline: none;
-    selection-background-color: %(orange)s; selection-color: #000000; }
+    selection-background-color: %(orange)s; selection-color: %(seltext)s; }
 QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { background: %(panel2)s; border-left: 1px solid %(line2)s; width: 18px; }
 
-/* mekanik düğmeler: siyah metal gövde, üstte ince ışık, basınca içe göçer */
+/* mekanik düğmeler: metal gövde, üstte ince ışık, basınca içe göçer */
 QPushButton {
     font-family: 'JetBrains Mono'; font-weight: 700; font-size: 13px; letter-spacing: 1px; color: %(text)s;
-    background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #232323, stop:0.08 #1A1A1A, stop:0.5 #121212, stop:1 #0A0A0A);
-    border: 1px solid #2E2E2E; border-bottom: 2px solid #000000; border-top: 1px solid #3A3A3A;
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %(btn1)s, stop:0.08 %(btn2)s, stop:0.5 %(btn3)s, stop:1 %(btn4)s);
+    border: 1px solid %(btnb)s; border-bottom: 2px solid %(shadow)s; border-top: 1px solid %(btnt)s;
     border-radius: 3px; padding: 9px 14px; }
-QPushButton:hover { color: %(orange2)s; border: 1px solid %(orange3)s; border-bottom: 2px solid #000000; }
-QPushButton:pressed { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #050505, stop:1 #141414);
-    border-top: 2px solid #000000; border-bottom: 1px solid #2E2E2E; padding-top: 10px; padding-bottom: 8px; }
-QPushButton:disabled { color: %(dim)s; background: #0C0C0C; border: 1px solid #191919; }
+QPushButton:hover { color: %(orange2)s; border: 1px solid %(orange3)s; border-bottom: 2px solid %(shadow)s; }
+QPushButton:pressed { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %(press1)s, stop:1 %(press2)s);
+    border-top: 2px solid %(shadow)s; border-bottom: 1px solid %(btnb)s; padding-top: 10px; padding-bottom: 8px; }
+QPushButton:disabled { color: %(dim)s; background: %(disbg)s; border: 1px solid %(disb)s; }
 QPushButton#primary {
     color: %(orange)s; font-size: 14px; padding: 13px; letter-spacing: 2px;
-    background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #262626, stop:0.07 #1B1B1B, stop:0.55 #111111, stop:1 #080808);
-    border: 1px solid %(orange3)s; border-left: 4px solid %(orange)s; border-bottom: 2px solid #000000; }
-QPushButton#primary:hover { color: #000000; background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %(orange2)s, stop:1 %(orange)s);
-    border: 1px solid %(orange2)s; border-left: 4px solid #FFFFFF; }
-QPushButton#primary:pressed { color: #000000; background: %(orange3)s; }
-QPushButton#primary:disabled { color: %(dim)s; border: 1px solid #1C1C1C; border-left: 4px solid #2A2A2A; background: #0C0C0C; }
-QPushButton#danger { color: %(warn)s; border: 1px solid #4A1A08; border-left: 4px solid %(warn)s; }
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %(pri1)s, stop:0.07 %(pri2)s, stop:0.55 %(pri3)s, stop:1 %(pri4)s);
+    border: 1px solid %(orange3)s; border-left: 4px solid %(orange)s; border-bottom: 2px solid %(shadow)s; }
+QPushButton#primary:hover { color: %(seltext)s; background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %(orange2)s, stop:1 %(orange)s);
+    border: 1px solid %(orange2)s; border-left: 4px solid %(hi)s; }
+QPushButton#primary:pressed { color: %(seltext)s; background: %(orange3)s; }
+QPushButton#primary:disabled { color: %(dim)s; border: 1px solid %(disb2)s; border-left: 4px solid %(disl)s; background: %(disbg)s; }
+QPushButton#danger { color: %(warn)s; border: 1px solid %(dangerb)s; border-left: 4px solid %(warn)s; }
 QPushButton#chip { font-family: 'Inter'; font-weight: 500; font-size: 12px; letter-spacing: 0; text-align: left;
     padding: 6px 10px; color: %(muted)s; background: %(field)s; border: 1px solid %(line)s; border-radius: 2px; }
 QPushButton#chip:hover { color: %(orange2)s; border-color: %(orange3)s; }
+QPushButton#preset { font-size: 12px; padding: 10px 6px; text-align: center; }
+QPushButton#preset:checked { color: %(orange)s; border: 1px solid %(orange)s; border-bottom: 3px solid %(orange)s; background: %(tint1)s; }
 QToolButton#seg { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 11px; letter-spacing: 1px; color: %(muted)s;
     background: %(field)s; border: 1px solid %(line2)s; border-radius: 2px; padding: 8px 4px; }
 QToolButton#seg:hover { color: %(orange2)s; border-color: %(orange3)s; }
-QToolButton#seg:checked { color: %(orange)s; border: 1px solid %(orange)s; border-bottom: 3px solid %(orange)s; background: #120A03; }
+QToolButton#seg:checked { color: %(orange)s; border: 1px solid %(orange)s; border-bottom: 3px solid %(orange)s; background: %(tint1)s; }
+QToolButton#swatch { border: 2px solid %(line2)s; border-radius: 3px; min-width: 30px; min-height: 30px; }
+QToolButton#swatch:hover { border-color: %(orange2)s; }
+QToolButton#swatch:checked { border: 3px solid %(text)s; }
+QCheckBox { spacing: 8px; font-family: 'JetBrains Mono'; font-size: 12px; }
+QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid %(line2)s; background: %(field)s; border-radius: 2px; }
+QCheckBox::indicator:checked { background: %(orange)s; border-color: %(orange)s; }
+QSlider::groove:horizontal { height: 6px; background: %(deep)s; border: 1px solid %(line2)s; border-radius: 2px; }
+QSlider::sub-page:horizontal { background: %(orange)s; border-radius: 2px; }
+QSlider::handle:horizontal { background: %(text)s; width: 12px; margin: -6px 0; border-radius: 2px; }
 
 QTabWidget::pane { border: none; }
 QTabBar::tab { font-family: 'JetBrains Mono'; background: transparent; color: %(muted)s; padding: 12px 20px;
     font-weight: 700; letter-spacing: 2px; border-bottom: 2px solid %(line)s; }
 QTabBar::tab:hover { color: %(text)s; }
-QTabBar::tab:selected { color: %(orange)s; border-bottom: 2px solid %(orange)s; background: #0E0905; }
+QTabBar::tab:selected { color: %(orange)s; border-bottom: 2px solid %(orange)s; background: %(tint2)s; }
 
 /* segmentli ilerleme göstergesi */
-QProgressBar { background: #000000; border: 1px solid %(line2)s; border-radius: 2px; height: 16px; padding: 2px; }
+QProgressBar { background: %(deep)s; border: 1px solid %(line2)s; border-radius: 2px; height: 16px; padding: 2px; }
 QProgressBar::chunk { background: %(orange)s; width: 9px; margin: 0 1px; }
 
 QLabel#preview { background: #000000; border: 1px solid %(line)s; border-radius: 2px; }
 QLabel#status { font-family: 'JetBrains Mono'; color: %(muted)s; font-size: 12px; }
+QLabel#hint { color: %(muted)s; font-size: 12px; }
 QLabel[class="step"] { font-family: 'JetBrains Mono'; color: %(dim)s; font-weight: 700; font-size: 12px; }
 QLabel[class="stepon"] { font-family: 'JetBrains Mono'; color: %(orange)s; font-weight: 800; font-size: 12px; }
 QLabel[class="stepdone"] { font-family: 'JetBrains Mono'; color: %(text)s; font-weight: 700; font-size: 12px; }
-QPlainTextEdit#log { font-family: 'JetBrains Mono'; font-size: 12px; color: %(orange2)s; background: #000000; }
+QPlainTextEdit#log { font-family: 'JetBrains Mono'; font-size: 12px; color: %(orange2)s; background: %(deep)s; }
 QListWidget { outline: none; }
 QListWidget::item { padding: 10px; border-left: 2px solid transparent; margin: 1px 0; }
-QListWidget::item:hover { background: #100B06; }
-QListWidget::item:selected { background: #1A0F05; color: %(orange)s; border-left: 2px solid %(orange)s; }
+QListWidget::item:hover { background: %(tint3)s; }
+QListWidget::item:selected { background: %(tint4)s; color: %(orange)s; border-left: 2px solid %(orange)s; }
 QScrollBar:vertical { background: %(bg)s; width: 10px; margin: 0; }
-QScrollBar::handle:vertical { background: #262626; min-height: 30px; border-radius: 1px; }
+QScrollBar::handle:vertical { background: %(handle)s; min-height: 30px; border-radius: 1px; }
 QScrollBar::handle:vertical:hover { background: %(orange3)s; }
 QScrollBar:horizontal { background: %(bg)s; height: 10px; margin: 0; }
-QScrollBar::handle:horizontal { background: #262626; min-width: 30px; border-radius: 1px; }
+QScrollBar::handle:horizontal { background: %(handle)s; min-width: 30px; border-radius: 1px; }
 QScrollBar::handle:horizontal:hover { background: %(orange3)s; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 QLabel#formlabel { font-family: 'JetBrains Mono'; color: %(muted)s; font-size: 12px; letter-spacing: 1px; }
-QFrame#banner { background: #140A02; border: 1px solid %(orange3)s; border-left: 4px solid %(orange)s; border-radius: 2px; }
+QFrame#banner { background: %(tint5)s; border: 1px solid %(orange3)s; border-left: 4px solid %(orange)s; border-radius: 2px; }
+QFrame#group { background: %(panel)s; border: 1px solid %(line)s; border-radius: 3px; }
 QLabel#bannertext { font-family: 'JetBrains Mono'; color: %(orange)s; font-weight: 700; letter-spacing: 1px; }
-QToolTip { background: #000000; color: %(orange2)s; border: 1px solid %(orange3)s; font-family: 'JetBrains Mono'; }
+QToolTip { background: %(panel2)s; color: %(orange2)s; border: 1px solid %(orange3)s; font-family: 'JetBrains Mono'; }
 """
 
 
 def app_stylesheet():
     def asset(name):
         return os.path.join(HERE, "assets", name).replace("\\", "/")
-    return QSS % dict(C, tile=asset("bg_tile.png"), arrow_down=asset("arrow_down.png"),
-                      arrow_up=asset("arrow_up.png"))
+    tile = f"background-image: url({asset('bg_tile.png')});" if C.get("tile") else "background-image: none;"
+    return QSS % dict(C, tile_rule=tile, arrow_down=asset("arrow_down.png"), arrow_up=asset("arrow_up.png"))
 
 
 def pil_to_pixmap(im):
@@ -179,17 +264,22 @@ def pil_to_pixmap(im):
     return QPixmap.fromImage(qi.copy())
 
 
-def render_still(scene, style, t=None, size=(960, 540)):
-    """Tek bir sahnenin bir karesini (varsayılan: animasyonlar bitmişken) çizer."""
+def render_still(scene, style, t=None, size=(960, 540), accent="", bg="", subs=None):
+    """Tek bir sahnenin bir karesini (varsayılan: animasyonlar bitmişken) çizer.
+    subs: altyazı ayarları verilirse anlatım altyazı olarak da çizilir."""
     from PIL import Image
-    theme.apply_style(style)
-    D._paper = None if getattr(render_still, "_style", None) != style else D._paper
-    render_still._style = style
+    theme.apply_style(style, accent=accent or "", bg=bg or "")
+    key = (style, bg)
+    D._paper = None if getattr(render_still, "_key", None) != key else D._paper
+    render_still._key = key
     sc = dict(scene)
     sc.setdefault("duration", 8)
     dur = float(sc["duration"])
     t = dur * 0.6 if t is None else t
-    surf, ctx = D.new_surface()
+    if subs is not None:
+        D.SUB_OPTS = dict(D.SUB_OPTS, **subs)
+        sc["_subs"], sc["_speech"] = True, dur * 2  # tüm süre boyunca altyazı görünsün
+    surf, ctx = D.new_surface(scale=max(0.3, size[0] / theme.W))  # küçük önizleme küçük çizilir, hızlıdır
     try:
         if sc.get("type") == "image" and sc.get("image_path") and not os.path.exists(sc["image_path"]):
             sc.pop("image_path")
@@ -211,6 +301,140 @@ def slugify(s):
     return s[:40] or "video"
 
 
+class ColorRow(QWidget):
+    """Renk örnekleri + "özel renk" düğmesi. value(): "#RRGGBB" ya da "" (stilin kendi rengi)."""
+    changed = Signal(str)
+
+    def __init__(self, swatches, parent=None):
+        super().__init__(parent)
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(5)
+        self.grp = QButtonGroup(self)
+        self.grp.setExclusive(True)
+        self.custom_hex = ""
+        for hexcol, name in swatches:
+            b = self._swatch(hexcol, name)
+            h.addWidget(b)
+        self.btn_custom = self._swatch("custom", "Kendi rengini seç…")
+        self.btn_custom.setText("＋")
+        self.btn_custom.clicked.connect(self.pick_custom)
+        h.addWidget(self.btn_custom)
+        h.addStretch(1)
+        self.grp.buttons()[0].setChecked(True)
+        self.grp.buttonClicked.connect(lambda b: b is not self.btn_custom and self.changed.emit(self.value()))
+
+    def _swatch(self, hexcol, name):
+        b = QToolButton(objectName="swatch")
+        b.setCheckable(True)
+        b.setToolTip(name)
+        b.setProperty("hex", hexcol)
+        if hexcol in ("", "custom"):
+            b.setText("∅" if hexcol == "" else "＋")
+        else:
+            b.setStyleSheet(f"QToolButton#swatch {{ background: {hexcol}; }}")
+        self.grp.addButton(b)
+        return b
+
+    def pick_custom(self):
+        c = QColorDialog.getColor(QColor(self.custom_hex or "#FF7A1A"), self, "Renk seç")
+        if c.isValid():
+            self.set_value(c.name().upper())
+            self.changed.emit(self.value())
+        else:
+            self.set_value(self.value())
+
+    def value(self):
+        b = self.grp.checkedButton()
+        if not b:
+            return ""
+        return self.custom_hex if b is self.btn_custom else b.property("hex")
+
+    def set_value(self, hexcol):
+        hexcol = (hexcol or "").upper()
+        for b in self.grp.buttons():
+            if b is not self.btn_custom and (b.property("hex") or "").upper() == hexcol:
+                b.setChecked(True)
+                return
+        self.custom_hex = hexcol
+        self.btn_custom.setChecked(True)
+        self.btn_custom.setStyleSheet(f"QToolButton#swatch {{ background: {hexcol}; color: #000000; }}")
+
+
+class SettingsDialog(QDialog):
+    """Uygulama ayarları: tema, vurgu rengi, açılış efekti, kayıt klasörü."""
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.win = win
+        self.setWindowTitle(f"{APP_NAME} · Ayarlar")
+        self.setMinimumWidth(560)
+        st = win.settings
+        v = QVBoxLayout(self)
+        v.setContentsMargins(24, 20, 24, 20)
+        v.setSpacing(8)
+        v.addWidget(win._section("Uygulama teması"))
+        self.mode = win._segmented([("koyu", "KOYU"), ("acik", "AÇIK")], st.value("app_mode", "koyu"), v, self)
+        v.addWidget(win._section("Uygulama vurgu rengi"))
+        names = {"turuncu": "TURUNCU", "mavi": "MAVİ", "yesil": "YEŞİL", "mor": "MOR", "kirmizi": "KIRMIZI",
+                 "altin": "ALTIN"}
+        self.accent = win._segmented([(k, names[k]) for k in APP_ACCENTS], st.value("app_accent", "turuncu"), v, self)
+        v.addWidget(win._section("Açılış efekti"))
+        self.splash = win._segmented([("1", "AÇIK"), ("0", "KAPALI")], st.value("splash", "1"), v, self)
+        v.addWidget(win._section("Açılış sesi"))
+        self.sound = win._segmented([("1", "AÇIK"), ("0", "KAPALI")], st.value("splash_sound", "1"), v, self)
+        v.addWidget(win._section("Kayıt klasörü"))
+        h = QHBoxLayout()
+        self.outdir = QLineEdit(win.outdir.text())
+        ob = QPushButton("Seç")
+        ob.clicked.connect(self.pick_outdir)
+        h.addWidget(self.outdir, 1)
+        h.addWidget(ob)
+        v.addLayout(h)
+        v.addWidget(win._section("Senaryo yazan yapay zekâ"))
+        hint = QLabel("Model seçimi ve kurulum sol paneldeki “Senaryo yazan yapay zekâ” bölümündedir.", objectName="hint")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+        v.addSpacing(10)
+        bb = QDialogButtonBox()
+        ok = bb.addButton("KAYDET", QDialogButtonBox.AcceptRole)
+        ok.setObjectName("primary")
+        bb.addButton("VAZGEÇ", QDialogButtonBox.RejectRole)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        v.addWidget(bb)
+        for g in (self.mode, self.accent):  # tema anında denensin
+            g.buttonClicked.connect(lambda _: self.preview_theme())
+        self._old = (st.value("app_mode", "koyu"), st.value("app_accent", "turuncu"))
+
+    def pick_outdir(self):
+        p = QFileDialog.getExistingDirectory(self, "Kayıt klasörü", self.outdir.text())
+        if p:
+            self.outdir.setText(p)
+
+    def preview_theme(self):
+        set_app_theme(self.mode.value(), self.accent.value())
+        QApplication.instance().setStyleSheet(app_stylesheet())
+
+    def reject(self):
+        set_app_theme(*self._old)
+        QApplication.instance().setStyleSheet(app_stylesheet())
+        super().reject()
+
+    def accept(self):
+        st = self.win.settings
+        st.setValue("app_mode", self.mode.value())
+        st.setValue("app_accent", self.accent.value())
+        st.setValue("splash", self.splash.value())
+        st.setValue("splash_sound", self.sound.value())
+        if self.outdir.text().strip():
+            self.win.outdir.setText(self.outdir.text().strip())
+            st.setValue("outdir", self.outdir.text().strip())
+            self.win.refresh_library()
+        self.preview_theme()
+        super().accept()
+
+
 # --- Arka plan işçisi --------------------------------------------------------
 
 class Worker(QThread):
@@ -228,11 +452,6 @@ class Worker(QThread):
         self.mode, self.prompt, self.plan, self.out_dir, self.opts = mode, prompt, plan, out_dir, opts or {}
         self.findings = findings
         self._cancel = threading.Event()
-
-    def on_progress(self, f):
-        self.bar.setValue(int(f * 1000))
-        i, n = getattr(self, "_stage", (1, 1))
-        self.wait.set_progress((i - 1 + f) / n)  # bütün işin ilerlemesi: adamın yamaçtaki yeri
 
     def cancel(self):
         self._cancel.set()
@@ -270,17 +489,20 @@ class Worker(QThread):
         sys.stdout = Stream()
         try:
             if self.mode == "research":
-                self.researched.emit(pipeline.research_topic(self.prompt, self.out_dir, cb=cb))
+                self.researched.emit(pipeline.research_topic(self.prompt, self.out_dir, self.opts.get("lang", "tr"), cb=cb))
             elif self.mode == "plan":
-                plan = pipeline.write_plan(self.prompt, self.findings, self.out_dir, cb=cb,
-                                           length=self.opts.get("length", "orta"))
+                plan = pipeline.write_plan(self.prompt, self.findings, self.out_dir, self.opts.get("lang", "tr"), cb=cb,
+                                           length=self.opts.get("length", "orta"), kind=self.opts.get("kind"))
                 self.planned.emit(plan)
             else:
                 o = self.opts
                 out = pipeline.render_plan(self.plan, self.out_dir, o.get("style"), o.get("voice") or None,
-                                           o.get("music") or None, not o.get("voice"), cb=cb,
+                                           o.get("music") or None, not o.get("voice"), o.get("lang", "tr"), cb=cb,
                                            subtitles=o.get("subtitles", False), sfx=o.get("sfx", True),
-                                           vertical=o.get("vertical", False))
+                                           vertical=o.get("vertical", False), square=o.get("square", False),
+                                           quality=o.get("quality", "1080"), fps=o.get("fps", 30),
+                                           tempo=o.get("tempo", "normal"), accent=o.get("accent"), bg=o.get("bg"),
+                                           sub_opts=o.get("sub_opts"), music_vol=o.get("music_vol", 0.35))
                 self.finished_ok.emit(out)
         except pipeline.Cancelled:
             self.failed.emit("İptal edildi.")
@@ -380,16 +602,21 @@ class MainWindow(QMainWindow):
         self.plan_dir = None
         self.worker = None
         self.last_video = None
-        self.style = "mekanik"  # uygulamada tek görünüm
+        self.style = "mekanik"  # seçili video stili (Stil ve format sekmesi)
 
         root = QWidget(objectName="root")
         self.setCentralWidget(root)
         lay = QHBoxLayout(root)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        lay.addWidget(self._build_sidebar())
+        self.side = self._build_sidebar()
+        lay.addWidget(self.side)
         lay.addWidget(self._build_main(), 1)
+        self.auto_chain = False  # basit mod: araştır -> senaryo -> video kendiliğinden
 
+        self.set_options(self._saved_options())
+        self.set_simple(self.settings.value("simple", "1") == "1")
+        self.refresh_profiles()
         self.check_ollama()
         QTimer.singleShot(1500, self.check_updates)
         self.refresh_library()
@@ -420,6 +647,21 @@ class MainWindow(QMainWindow):
         v.addWidget(QLabel("▌DARKROOM", objectName="brand"))
         v.addWidget(QLabel("credit by EC", objectName="brandsub"))
 
+        v.addWidget(self._section("Profil"))
+        h = QHBoxLayout()
+        self.profile = QComboBox()
+        self.profile.setToolTip("Kaydettiğin ayar takımları. Seçince bütün video ayarları yüklenir.")
+        self.profile.activated.connect(self.load_profile)
+        bs = QPushButton("KAYDET")
+        bs.setToolTip("Şu anki bütün video ayarlarını bir isimle kaydet")
+        bs.clicked.connect(self.save_profile)
+        bd = QPushButton("SİL")
+        bd.clicked.connect(self.delete_profile)
+        h.addWidget(self.profile, 1)
+        h.addWidget(bs)
+        h.addWidget(bd)
+        v.addLayout(h)
+
         v.addWidget(self._section("Konu"))
         self.prompt = QPlainTextEdit()
         self.prompt.setPlaceholderText("Videonun konusunu yazın…\nör. Türkiye'de en çok ihracat yapılan ürünler")
@@ -433,52 +675,33 @@ class MainWindow(QMainWindow):
             b.clicked.connect(lambda _=False, e=ex: self.prompt.setPlainText(e))
             v.addWidget(b)
 
+        v.addWidget(self._section("Hazır stiller"))
+        g = QGridLayout()
+        g.setSpacing(6)
+        self.preset_btns = {}
+        for i, (key, (label, tip, _)) in enumerate(PRESETS.items()):
+            b = QPushButton(label, objectName="preset")
+            b.setCheckable(True)
+            b.setToolTip(tip)
+            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            b.clicked.connect(lambda _=False, k=key: self.apply_preset(k))
+            g.addWidget(b, i // 3, i % 3)
+            self.preset_btns[key] = b
+        v.addLayout(g)
+        more = QPushButton("⚙ TÜM VİDEO AYARLARI", objectName="chip")
+        more.clicked.connect(lambda: self.tabs.setCurrentWidget(self.tab_style))
+        v.addWidget(more)
+
         v.addWidget(self._section("Video süresi"))
         self.length = self._segmented([("kisa", "KISA\n~30 sn"), ("orta", "ORTA\n~1 dk"), ("uzun", "UZUN\n~2 dk")],
                                       self.settings.value("length", "orta"), v)
 
-        v.addWidget(self._section("Altyazı"))
-        self.subs = self._segmented([("0", "YOK"), ("1", "VİDEOYA YAZ")], self.settings.value("subs", "1"), v)
+        v.addWidget(self._section("Video dili"))
+        self.lang = self._segmented([("tr", "TÜRKÇE"), ("en", "ENGLISH")], "tr", v)
+        self.lang.buttonClicked.connect(lambda _: self.fill_voices())
 
-        v.addWidget(self._section("Seslendirme"))
-        self.voice = QComboBox()
-        for name, val in VOICES:  # noqa
-            self.voice.addItem(name, val)
-        self.voice.setCurrentIndex(int(self.settings.value("voice_idx", 0)))
-        v.addWidget(self.voice)
-
-        v.addWidget(self._section("Arka plan müziği"))
-        h = QHBoxLayout()
-        self.music_mode = QComboBox()
-        for name, val in MUSIC_MODES:
-            self.music_mode.addItem(name, val)
-        self.music_mode.setCurrentIndex(max(0, self.music_mode.findData(self.settings.value("music_mode", "auto:sakin"))))
-        self.music = QLineEdit(self.settings.value("music", ""))
-        self.music.setPlaceholderText("mp3 / wav dosyası")
-        self.music_btn = QPushButton("Seç")
-        self.music_btn.clicked.connect(self.pick_music)
-        self.music_mode.currentIndexChanged.connect(self.on_music_mode)
-        h.addWidget(self.music_mode, 1)
-        h.addWidget(self.music_btn)
-        v.addLayout(h)
-        v.addWidget(self.music)
-        self.on_music_mode()
-
-        v.addWidget(self._section("Dikey sürüm (Shorts / Reels / TikTok)"))
-        self.vert = self._segmented([("0", "YOK"), ("1", "OLUŞTUR")], self.settings.value("vertical", "0"), v)
-
-        v.addWidget(self._section("Ses efektleri"))
-        self.sfx = self._segmented([("1", "AÇIK"), ("0", "KAPALI")], self.settings.value("sfx", "1"), v)
-
-        v.addWidget(self._section("Kayıt klasörü"))
-        h = QHBoxLayout()
         default_out = os.path.join(os.path.expanduser("~"), "Videos", "DARKROOM")
-        self.outdir = QLineEdit(self.settings.value("outdir", default_out))
-        ob = QPushButton("Seç")
-        ob.clicked.connect(self.pick_outdir)
-        h.addWidget(self.outdir, 1)
-        h.addWidget(ob)
-        v.addLayout(h)
+        self.outdir = QLineEdit(self.settings.value("outdir", default_out))  # Ayarlar penceresinden değişir
 
         v.addWidget(self._section("Senaryo yazan yapay zekâ"))
         self.ai_status = QLabel("Kontrol ediliyor…")
@@ -531,7 +754,11 @@ class MainWindow(QMainWindow):
         foot = QHBoxLayout()
         ver = QLabel(f"v{__version__}", objectName="status")
         foot.addWidget(ver, 1)
-        chk = QPushButton("GÜNCELLEMELERİ DENETLE", objectName="chip")
+        cfg = QPushButton("⚙ AYARLAR", objectName="chip")
+        cfg.clicked.connect(self.open_settings)
+        foot.addWidget(cfg)
+        chk = QPushButton("GÜNCELLE", objectName="chip")
+        chk.setToolTip("Güncellemeleri denetle")
         chk.clicked.connect(lambda: self.check_updates(manual=True))
         tok = QPushButton("TOKEN", objectName="chip")
         tok.setToolTip("GitHub token (yalnızca depo gizliyse gerekir)")
@@ -546,17 +773,134 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.tabBar().setDrawBase(False)
-        self.tabs.addTab(self._build_preview_tab(), "Önizleme")
-        self.tabs.addTab(self._build_research_tab(), "Araştırma")
-        self.tabs.addTab(self._build_editor_tab(), "Senaryo")
+        self.tab_preview = self._build_preview_tab()
+        self.tab_style = self._build_style_tab()
+        self.tab_research = self._build_research_tab()
+        self.tab_editor = self._build_editor_tab()
+        self.tabs.addTab(self.tab_preview, "Önizleme")
+        self.tabs.addTab(self.tab_style, "Stil ve format")
+        self.tabs.addTab(self.tab_research, "Araştırma")
+        self.tabs.addTab(self.tab_editor, "Senaryo")
         self.tabs.addTab(self._build_library_tab(), "Videolarım")
+        self.tabs.currentChanged.connect(lambda _: self.tabs.currentWidget() is self.tab_style and self.refresh_style_preview())
         w = QWidget()
         l = QVBoxLayout(w)
         l.setContentsMargins(24, 12, 24, 20)
         l.addWidget(self._build_update_banner())
         l.addWidget(self._build_ai_banner())
+        l.addWidget(self._build_simple_panel())
         l.addWidget(self.tabs)
         return w
+
+    # ---- basit mod: tek kutu, tek düğme; ayarları prompt belirler ----
+    def _build_simple_panel(self):
+        self.simple_panel = QWidget()
+        v = QVBoxLayout(self.simple_panel)
+        v.setContentsMargins(0, 8, 0, 4)
+        v.setSpacing(8)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("▌DARKROOM", objectName="brand"))
+        top.addWidget(QLabel("  credit by EC", objectName="brandsub"))
+        top.addStretch(1)
+        adv = QPushButton("⚙ GELİŞMİŞ MOD", objectName="chip")
+        adv.setToolTip("Bütün ayarları elle seçmek, senaryoyu düzenlemek için")
+        adv.clicked.connect(lambda: self.set_simple(False))
+        top.addWidget(adv)
+        v.addLayout(top)
+        row = QHBoxLayout()
+        self.simple_prompt = QPlainTextEdit()
+        self.simple_prompt.setPlaceholderText(
+            "Nasıl bir video istediğini yaz, gerisini program seçsin…\n"
+            "ör. Shorts için kısa bir video: Kahvenin dünyaya yayılış hikâyesi\n"
+            "ör. Osmanlı İmparatorluğu'nun yükselişi, detaylı, epik müzikli, 4K")
+        self.simple_prompt.setFixedHeight(92)
+        self.simple_prompt.setPlainText(self.settings.value("prompt", ""))
+        self.simple_prompt.textChanged.connect(lambda: self._auto_timer.start(250))
+        row.addWidget(self.simple_prompt, 1)
+        col = QVBoxLayout()
+        self.btn_make = QPushButton("▶  VİDEOYU YAP", objectName="primary")
+        self.btn_make.setMinimumWidth(230)
+        self.btn_make.setMinimumHeight(60)
+        self.btn_make.clicked.connect(self.start_auto)
+        col.addWidget(self.btn_make)
+        self.btn_cancel2 = QPushButton("■ İPTAL", objectName="danger")
+        self.btn_cancel2.clicked.connect(self.cancel)
+        self.btn_cancel2.hide()
+        col.addWidget(self.btn_cancel2)
+        col.addStretch(1)
+        row.addLayout(col)
+        v.addLayout(row)
+        kl = QHBoxLayout()
+        kl.addWidget(QLabel("VİDEO TÜRÜ", objectName="formlabel"))
+        v.addLayout(kl)
+        self.kind_sel = self._segmented([(k, d["label"]) for k, d in kinds.KINDS.items()], kinds.DEFAULT, v)
+        for b in self.kind_sel.buttons():
+            b.setToolTip(kinds.KINDS[b.property("key")]["desc"])
+        self._kind_locked = False
+        self.kind_sel.buttonClicked.connect(self._on_kind_clicked)
+        ex = QHBoxLayout()
+        for e in ("Shorts için kısa bir video: Kahvenin dünyaya yayılış hikâyesi",
+                  "Osmanlı İmparatorluğu'nun yükselişi, detaylı",
+                  "Avrupa'da enflasyon: Türkiye, Almanya, Fransa"):
+            b = QPushButton("↳ " + e, objectName="chip")
+            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            b.setToolTip(e)
+            b.clicked.connect(lambda _=False, t=e: self.simple_prompt.setPlainText(t))
+            ex.addWidget(b)
+        v.addLayout(ex)
+        self.auto_info = QLabel("", objectName="status")
+        self.auto_info.setWordWrap(True)
+        v.addWidget(self.auto_info)
+        self._auto_timer = QTimer(self)
+        self._auto_timer.setSingleShot(True)
+        self._auto_timer.timeout.connect(self.update_auto_info)
+        return self.simple_panel
+
+    def _on_kind_clicked(self, *_):
+        self._kind_locked = True  # kullanıcı seçti: prompt artık türü değiştirmez
+        self.update_auto_info()
+
+    def set_simple(self, on):
+        self.simple = on
+        self.settings.setValue("simple", "1" if on else "0")
+        self.side.setVisible(not on)
+        self.simple_panel.setVisible(on)
+        self.tabs.tabBar().setVisible(not on)
+        if not self.last_video and not self.busy():
+            self.preview.setText("> Ne istediğini yaz,  [ VİDEOYU YAP ]  düğmesine bas_" if on else
+                                 "> Bir konu yazıp  [ ARAŞTIR ]  düğmesine basın_")
+        if on:
+            self.simple_prompt.setPlainText(self.prompt.toPlainText())
+            self.tabs.setCurrentWidget(self.tab_preview)
+            self.update_auto_info()
+        else:
+            self.prompt.setPlainText(self.simple_prompt.toPlainText())
+
+    def update_auto_info(self):
+        text = self.simple_prompt.toPlainText().strip()
+        if not text:
+            self.auto_info.setText("Program yazdığına göre stili, müziği, süreyi ve formatı kendisi seçer.")
+            return
+        if not self._kind_locked:
+            self.kind_sel.set_value(kinds.detect(text) or kinds.DEFAULT)
+        _, why, topic = autoset.infer(text, self.kind_sel.value())
+        self.auto_info.setText(f"KONU ▸ {topic}\nSEÇİLENLER ▸ " + "  ·  ".join(why))
+
+    def start_auto(self):
+        text = self.simple_prompt.toPlainText().strip()
+        if not text:
+            QMessageBox.information(self, APP_NAME, "Önce nasıl bir video istediğini yaz.")
+            return
+        if self.busy():
+            return
+        opts, why, topic = autoset.infer(text, self.kind_sel.value())
+        self.set_options(opts)
+        self.prompt.setPlainText(topic)
+        self.findings, self.plan = None, None
+        self.auto_chain = True
+        self.log.clear()
+        self.append_log("Seçilen ayarlar: " + " · ".join(why))
+        self.start_research()
 
     def _build_ai_banner(self):
         """Senaryo yapay zekâsı hazır değilse üstte görünür; tek tıkla kurulum ve ilerleme burada."""
@@ -710,6 +1054,144 @@ class MainWindow(QMainWindow):
         v.addWidget(self.log)
         return w
 
+    def _group(self, title, parent_layout):
+        """Başlıklı ayar kutusu; içine eklenecek dikey düzeni döner."""
+        box = QFrame(objectName="group")
+        v = QVBoxLayout(box)
+        v.setContentsMargins(16, 6, 16, 14)
+        v.setSpacing(6)
+        v.addWidget(self._section(title))
+        parent_layout.addWidget(box)
+        return v
+
+    def _label(self, text, v):
+        l = QLabel(text, objectName="formlabel")
+        v.addWidget(l)
+        return l
+
+    def _build_style_tab(self):
+        """Videonun görünümü, biçimi, temposu, altyazısı ve sesi: hepsi tek sayfada."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; } QScrollArea > QWidget > QWidget { background: transparent; }")
+        page = QWidget()
+        scroll.setWidget(page)
+        cols = QHBoxLayout(page)
+        cols.setContentsMargins(0, 16, 8, 8)
+        cols.setSpacing(16)
+        left, right = QVBoxLayout(), QVBoxLayout()
+        left.setSpacing(12)
+        right.setSpacing(12)
+        cols.addLayout(left, 1)
+        cols.addLayout(right, 1)
+        self._style_ctrls = []
+
+        v = self._group("Video türü", left)
+        self.kind_combo = QComboBox()
+        for k, d in kinds.KINDS.items():
+            self.kind_combo.addItem(f"{d['name']}  ·  {d['desc']}", k)
+        self.kind_combo.setCurrentIndex(max(0, self.kind_combo.findData(kinds.DEFAULT)))
+        self.kind_combo.activated.connect(self.on_kind_combo)
+        v.addWidget(self.kind_combo)
+        hint = QLabel("Tür senaryonun yapısını belirler (ör. kinetik yazıda anlatım büyük yazıya dönüşür). "
+                      "Seçince görünüm ve müzik de türe uygun hale gelir.", objectName="hint")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+
+        v = self._group("Görünüm", left)
+        self.style_combo = QComboBox()
+        for k, name in theme.STYLE_NAMES.items():
+            self.style_combo.addItem(name, k)
+        self.style_combo.currentIndexChanged.connect(self.on_option_changed)
+        v.addWidget(self.style_combo)
+        self._label("VURGU RENGİ", v)
+        self.accent_row = ColorRow(ACCENT_SWATCHES)
+        self.accent_row.changed.connect(self.on_option_changed)
+        v.addWidget(self.accent_row)
+        self._label("ARKA PLAN", v)
+        self.bg_row = ColorRow(BG_SWATCHES)
+        self.bg_row.changed.connect(self.on_option_changed)
+        v.addWidget(self.bg_row)
+        self._label("ÖNİZLEME", v)
+        self.style_preview = QLabel(objectName="preview")
+        self.style_preview.setAlignment(Qt.AlignCenter)
+        self.style_preview.setFixedSize(512, 288)
+        v.addWidget(self.style_preview)
+
+        v = self._group("Tempo", left)
+        self.tempo = self._segmented([("yavas", "YAVAŞ\nsakin anlatım"), ("normal", "NORMAL"),
+                                      ("hizli", "HIZLI\nsosyal medya")], "normal", v)
+        hint = QLabel("Tempo seslendirmenin hızını ve sahneler arasındaki nefes payını değiştirir.", objectName="hint")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+        left.addStretch(1)
+
+        v = self._group("Format ve kalite", right)
+        self._label("ANA VİDEO: 16:9 YATAY (YOUTUBE). AYRICA OLUŞTUR:", v)
+        self.vert = self._segmented([("0", "DİKEY YOK"), ("1", "DİKEY 9:16\nShorts / Reels")], "0", v)
+        self.square = self._segmented([("0", "KARE YOK"), ("1", "KARE 1:1\nInstagram")], "0", v)
+        self._label("ÇÖZÜNÜRLÜK", v)
+        self.quality = self._segmented([("720", "720p"), ("1080", "1080p"), ("1440", "1440p"), ("2160", "4K")], "1080", v)
+        self._label("KARE HIZI", v)
+        self.fps = self._segmented([("30", "30 FPS"), ("60", "60 FPS\ndaha akıcı")], "30", v)
+        self.quality_hint = QLabel("", objectName="hint")
+        self.quality_hint.setWordWrap(True)
+        v.addWidget(self.quality_hint)
+
+        v = self._group("Altyazı", right)
+        self.subs = self._segmented([("0", "YOK"), ("1", "VİDEOYA YAZ")], "1", v)
+        self._label("BOYUT", v)
+        self.sub_size = self._segmented([("kucuk", "KÜÇÜK"), ("orta", "ORTA"), ("buyuk", "BÜYÜK")], "orta", v)
+        self._label("KONUM", v)
+        self.sub_pos = self._segmented([("alt", "ALTTA"), ("ust", "ÜSTTE")], "alt", v)
+        self._label("GÖRÜNÜM", v)
+        self.sub_box = self._segmented([("kutu", "KOYU KUTU"), ("vurgu", "RENKLİ KUTU"), ("golge", "KUTUSUZ")], "kutu", v)
+
+        v = self._group("Ses", right)
+        self._label("SESLENDİRME", v)
+        self.voice = QComboBox()
+        v.addWidget(self.voice)
+        self._label("ARKA PLAN MÜZİĞİ", v)
+        h = QHBoxLayout()
+        self.music_mode = QComboBox()
+        for name, val in MUSIC_MODES:
+            self.music_mode.addItem(name, val)
+        self.music = QLineEdit("")
+        self.music.setPlaceholderText("mp3 / wav dosyası")
+        self.music_btn = QPushButton("Seç")
+        self.music_btn.clicked.connect(self.pick_music)
+        self.music_mode.currentIndexChanged.connect(self.on_music_mode)
+        self.music_mode.currentIndexChanged.connect(self.on_option_changed)
+        h.addWidget(self.music_mode, 1)
+        h.addWidget(self.music_btn)
+        v.addLayout(h)
+        v.addWidget(self.music)
+        h = QHBoxLayout()
+        self.music_vol_label = QLabel("MÜZİK SEVİYESİ  %35", objectName="formlabel")
+        h.addWidget(self.music_vol_label)
+        self.music_vol = QSlider(Qt.Horizontal)
+        self.music_vol.setRange(0, 100)
+        self.music_vol.setValue(35)
+        self.music_vol.valueChanged.connect(lambda x: self.music_vol_label.setText(f"MÜZİK SEVİYESİ  %{x}"))
+        self.music_vol.valueChanged.connect(self.on_option_changed)
+        h.addWidget(self.music_vol, 1)
+        v.addLayout(h)
+        self._label("SES EFEKTLERİ", v)
+        self.sfx = self._segmented([("1", "AÇIK"), ("0", "KAPALI")], "1", v)
+        right.addStretch(1)
+
+        for g in (self.tempo, self.vert, self.square, self.quality, self.fps, self.subs, self.sub_size,
+                  self.sub_pos, self.sub_box, self.sfx, self.length):
+            g.buttonClicked.connect(self.on_option_changed)
+        self.voice.currentIndexChanged.connect(self.on_option_changed)
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.timeout.connect(self.refresh_style_preview)
+        self.fill_voices()
+        self.on_music_mode()
+        return scroll
+
     def _build_research_tab(self):
         w = QWidget()
         v = QVBoxLayout(w)
@@ -805,7 +1287,7 @@ class MainWindow(QMainWindow):
         self.set_busy(False)
         kinds = ", ".join("grafik" if f.get("series") else "tablo" if f.get("latest") else "metin" for f in new)
         self.status.setText(f"{len(new)} kaynak eklendi ({kinds}). Senaryo yazılırken kullanılacak.")
-        self.tabs.setCurrentIndex(1)
+        self.tabs.setCurrentWidget(self.tab_research)
 
     def populate_findings(self):
         self.finding_list.blockSignals(True)
@@ -860,6 +1342,10 @@ class MainWindow(QMainWindow):
         self.scene_list = QListWidget()
         self.scene_list.setFixedWidth(330)
         self.scene_list.currentRowChanged.connect(self.load_scene)
+        self.scene_list.setDragDropMode(QAbstractItemView.InternalMove)  # sürükleyip sırala
+        self.scene_list.setDefaultDropAction(Qt.MoveAction)
+        self.scene_list.model().rowsMoved.connect(lambda *_: QTimer.singleShot(0, self.on_scenes_dragged))
+        left.addWidget(QLabel("Sahneleri sürükleyerek sıralayabilirsin.", objectName="hint"))
         left.addWidget(self.scene_list, 1)
         tools = QGridLayout()
         self.add_type = QComboBox()
@@ -867,15 +1353,17 @@ class MainWindow(QMainWindow):
             self.add_type.addItem(f"{SCENE_ICONS[k]}  {v}", k)
         add = QPushButton("+ Ekle")
         add.clicked.connect(self.add_scene)
-        up, down, rm = QPushButton("↑"), QPushButton("↓"), QPushButton("Sil")
+        up, down, rm, dup = QPushButton("↑"), QPushButton("↓"), QPushButton("Sil"), QPushButton("Çoğalt")
         up.clicked.connect(lambda: self.move_scene(-1))
         down.clicked.connect(lambda: self.move_scene(1))
         rm.clicked.connect(self.remove_scene)
-        tools.addWidget(self.add_type, 0, 0, 1, 2)
-        tools.addWidget(add, 0, 2)
+        dup.clicked.connect(self.duplicate_scene)
+        tools.addWidget(self.add_type, 0, 0, 1, 3)
+        tools.addWidget(add, 0, 3)
         tools.addWidget(up, 1, 0)
         tools.addWidget(down, 1, 1)
-        tools.addWidget(rm, 1, 2)
+        tools.addWidget(dup, 1, 2)
+        tools.addWidget(rm, 1, 3)
         left.addLayout(tools)
         h.addLayout(left)
 
@@ -897,6 +1385,8 @@ class MainWindow(QMainWindow):
         self.f_dur = QDoubleSpinBox()
         self.f_dur.setRange(0, 60)
         self.f_dur.setSuffix(" sn (0 = otomatik)")
+        self.f_accent = ColorRow(ACCENT_SWATCHES)
+        self.f_accent.setToolTip("Yalnızca bu sahnenin vurgu rengi (∅ = videonun rengi)")
         self.f_data = QPlainTextEdit()
         self.f_data.setPlaceholderText("Sahneye özel alanlar (JSON): veriler, maddeler, tablo satırları…")
         form.addRow(QLabel("TÜR", objectName="formlabel"), self.f_type)
@@ -904,6 +1394,7 @@ class MainWindow(QMainWindow):
         form.addRow(QLabel("BAŞLIK", objectName="formlabel"), self.f_title)
         form.addRow(QLabel("ANLATIM", objectName="formlabel"), self.f_narr)
         form.addRow(QLabel("SÜRE", objectName="formlabel"), self.f_dur)
+        form.addRow(QLabel("RENK", objectName="formlabel"), self.f_accent)
         form.addRow(QLabel("VERİLER", objectName="formlabel"), self.f_data)
         self.f_check = QLabel("")
         self.f_check.setWordWrap(True)
@@ -942,11 +1433,12 @@ class MainWindow(QMainWindow):
         return w
 
     # ---- ayarlar ve küçük yardımcılar ----
-    def _segmented(self, options, current, v):
-        """Yan yana, tek seçimli mekanik düğmeler. Seçili anahtarı .value() ile okunan bir nesne döner."""
+    def _segmented(self, options, current, v, owner=None):
+        """Yan yana, tek seçimli mekanik düğmeler. Seçili anahtarı .value() ile okunan, .set_value() ile
+        değiştirilen bir nesne döner."""
         g = QHBoxLayout()
         g.setSpacing(6)
-        grp = QButtonGroup(self)
+        grp = QButtonGroup(owner or self)
         grp.setExclusive(True)
         for key, label in options:
             b = QToolButton(objectName="seg")
@@ -960,8 +1452,182 @@ class MainWindow(QMainWindow):
         if not grp.checkedButton():
             grp.buttons()[0].setChecked(True)
         grp.value = lambda: grp.checkedButton().property("key")
+
+        def set_value(key):
+            for b in grp.buttons():
+                if b.property("key") == str(key):
+                    b.setChecked(True)
+        grp.set_value = set_value
         v.addLayout(g)
         return grp
+
+    # ---- video seçenekleri: hazır stiller, profiller ----
+    OPTION_KEYS = ("kind", "style", "accent", "bg", "quality", "fps", "tempo", "vertical", "square", "subs", "sub_size",
+                   "sub_pos", "sub_box", "voice", "music_mode", "music", "music_vol", "sfx", "length", "lang")
+
+    def get_options(self):
+        return {"kind": self.kind_combo.currentData(), "style": self.style_combo.currentData(), "accent": self.accent_row.value(), "bg": self.bg_row.value(),
+                "quality": self.quality.value(), "fps": self.fps.value(), "tempo": self.tempo.value(),
+                "vertical": self.vert.value(), "square": self.square.value(), "subs": self.subs.value(),
+                "sub_size": self.sub_size.value(), "sub_pos": self.sub_pos.value(), "sub_box": self.sub_box.value(),
+                "voice": self.voice.currentData(), "music_mode": self.music_mode.currentData(),
+                "music": self.music.text(), "music_vol": self.music_vol.value(), "sfx": self.sfx.value(),
+                "length": self.length.value(), "lang": self.lang.value()}
+
+    def set_options(self, o):
+        """Verilen seçenekleri arayüze yükler (eksik olanlar olduğu gibi kalır)."""
+        self._loading = True
+        try:
+            if "lang" in o:
+                self.lang.set_value(o["lang"])
+                self.fill_voices()
+            if "kind" in o:
+                self.kind_combo.setCurrentIndex(max(0, self.kind_combo.findData(o["kind"])))
+                if hasattr(self, "kind_sel"):
+                    self.kind_sel.set_value(o["kind"])
+            if "style" in o:
+                self.style_combo.setCurrentIndex(max(0, self.style_combo.findData(o["style"])))
+            if "accent" in o:
+                self.accent_row.set_value(o["accent"])
+            if "bg" in o:
+                self.bg_row.set_value(o["bg"])
+            for key, grp in (("quality", self.quality), ("fps", self.fps), ("tempo", self.tempo),
+                             ("vertical", self.vert), ("square", self.square), ("subs", self.subs),
+                             ("sub_size", self.sub_size), ("sub_pos", self.sub_pos), ("sub_box", self.sub_box),
+                             ("sfx", self.sfx), ("length", self.length)):
+                if key in o:
+                    grp.set_value(o[key])
+            if "voice" in o:
+                i = self.voice.findData(o["voice"])
+                self.voice.setCurrentIndex(i if i >= 0 else 0)
+            if "music_mode" in o:
+                self.music_mode.setCurrentIndex(max(0, self.music_mode.findData(o["music_mode"])))
+            if "music" in o:
+                self.music.setText(o["music"])
+            if "music_vol" in o:
+                self.music_vol.setValue(int(o["music_vol"]))
+        finally:
+            self._loading = False
+        self.on_option_changed()
+
+    def _saved_options(self):
+        st = self.settings
+        try:
+            o = json.loads(st.value("options", "") or "{}")
+        except ValueError:
+            o = {}
+        if not o:  # eski sürümlerin ayarlarından
+            o = {"length": st.value("length", "orta"), "subs": st.value("subs", "1"),
+                 "music_mode": st.value("music_mode", "auto:sakin"), "music": st.value("music", ""),
+                 "vertical": st.value("vertical", "0"), "sfx": st.value("sfx", "1")}
+            vi = int(st.value("voice_idx", 0) or 0)
+            if 0 <= vi < len(VOICES):
+                o["voice"] = VOICES[vi][1]
+        return o
+
+    def fill_voices(self):
+        cur = self.voice.currentData()
+        self.voice.blockSignals(True)
+        self.voice.clear()
+        for name, val in VOICES_BY_LANG.get(self.lang.value(), VOICES):
+            self.voice.addItem(name, val)
+        i = self.voice.findData(cur)
+        self.voice.setCurrentIndex(i if i >= 0 else 0)
+        self.voice.blockSignals(False)
+
+    def on_kind_combo(self, *_):
+        kd = kinds.KINDS[self.kind_combo.currentData()]
+        o = {"kind": self.kind_combo.currentData()}
+        if kd.get("style"):
+            o["style"] = kd["style"]
+        if kd.get("music"):
+            o["music_mode"] = kd["music"]
+        self.set_options(o)
+
+    def look(self):
+        """Videonun görünümü: (stil, vurgu, arka plan)."""
+        return self.style_combo.currentData(), self.accent_row.value(), self.bg_row.value()
+
+    def sub_opts(self):
+        return {"size": D.SUB_SIZES.get(self.sub_size.value(), 42), "pos": self.sub_pos.value(),
+                "box": self.sub_box.value()}
+
+    def on_option_changed(self, *_):
+        if getattr(self, "_loading", False) or not hasattr(self, "music_vol"):
+            return
+        self.style = self.style_combo.currentData()
+        q, f = self.quality.value(), self.fps.value()
+        slow = {"720": 0.5, "1080": 1, "1440": 1.8, "2160": 4}[q] * (2 if f == "60" else 1)
+        self.quality_hint.setText(
+            f"Çizim süresi 1080p/30'a göre yaklaşık {slow:g} kat." if slow != 1 else
+            "Önerilen ayar: hız ve kalite dengesi.")
+        o = self.get_options()
+        for key, b in self.preset_btns.items():  # ayarlar bir hazır stille aynıysa o düğme yanık kalır
+            b.setChecked(all(o.get(k) == v for k, v in PRESETS[key][2].items()))
+        self._preview_timer.start(120)
+
+    def refresh_style_preview(self):
+        if self.busy() or self.tabs.currentWidget() is not self.tab_style:
+            return
+        style, accent, bg = self.look()
+        subs = self.sub_opts() if self.subs.value() == "1" else None
+        im = render_still(STYLE_SAMPLE, style, 5.5, (512, 288), accent, bg, subs)
+        self.style_preview.setPixmap(pil_to_pixmap(im))
+
+    def apply_preset(self, key):
+        self.set_options(PRESETS[key][2])
+        self.status.setText(f"Hazır stil: {PRESETS[key][0].title()}. İstersen “Stil ve format” sekmesinden ince ayar yap.")
+        self.refresh_style_preview()
+
+    def _profiles(self):
+        try:
+            return json.loads(self.settings.value("profiles", "") or "{}")
+        except ValueError:
+            return {}
+
+    def refresh_profiles(self, select=None):
+        self.profile.clear()
+        self.profile.addItem("— profil seç —", "")
+        for name in sorted(self._profiles()):
+            self.profile.addItem(name, name)
+        if select:
+            self.profile.setCurrentIndex(max(0, self.profile.findData(select)))
+
+    def save_profile(self):
+        cur = self.profile.currentData() or ""
+        name, ok = QInputDialog.getText(self, "Profili kaydet", "Profil adı (ör. Benim stilim):", text=cur)
+        name = name.strip()
+        if not ok or not name:
+            return
+        p = self._profiles()
+        if name in p and name != cur and QMessageBox.question(
+                self, APP_NAME, f"“{name}” zaten var. Üzerine yazılsın mı?") != QMessageBox.Yes:
+            return
+        p[name] = self.get_options()
+        self.settings.setValue("profiles", json.dumps(p, ensure_ascii=False))
+        self.refresh_profiles(name)
+        self.status.setText(f"Profil kaydedildi: {name}")
+
+    def load_profile(self, *_):
+        name = self.profile.currentData()
+        if name and name in self._profiles():
+            self.set_options(self._profiles()[name])
+            self.status.setText(f"Profil yüklendi: {name}")
+            self.refresh_style_preview()
+
+    def delete_profile(self):
+        name = self.profile.currentData()
+        if not name:
+            return
+        if QMessageBox.question(self, APP_NAME, f"“{name}” profili silinsin mi?") != QMessageBox.Yes:
+            return
+        p = self._profiles()
+        p.pop(name, None)
+        self.settings.setValue("profiles", json.dumps(p, ensure_ascii=False))
+        self.refresh_profiles()
+
+    def open_settings(self):
+        SettingsDialog(self).exec()
 
     def on_music_mode(self, *_):
         own = self.music_mode.currentData() == "file"
@@ -1075,11 +1741,23 @@ class MainWindow(QMainWindow):
             self.ai_status.setText(f"<span style='color:#FF4D1A'>■ Hazırlanamadı:</span> {why}")
             self.ai_banner_text.setText(f"HAZIRLANAMADI: {why}")
 
+    # tek düğmeli akışta her işin dağdaki payı: (başlangıç, genişlik)
+    AUTO_SPAN = {"research": (0.0, 0.12), "plan": (0.12, 0.13), "render": (0.25, 0.75)}
+
+    def _span(self):
+        if self.auto_chain and self.worker:
+            return self.AUTO_SPAN.get(self.worker.mode, (0.0, 1.0))
+        return 0.0, 1.0
+
     def set_busy(self, busy):
-        if busy:
+        if self.auto_chain and self.worker and self.worker.mode != "research" and busy:
+            self._stage = (1, 1)  # akış sürüyor: bekleme ekranı baştan başlamasın
+        elif busy:
             self._stage = (1, 1)
             self.wait.start(self.status.text().rstrip("…") if self.status.text() != "SİSTEM HAZIR" else "")
             self.preview_stack.setCurrentWidget(self.wait)
+        elif self.auto_chain:
+            pass  # bir sonraki adım hemen başlayacak
         else:
             self.wait.stop()
             self.preview_stack.setCurrentWidget(self.preview)
@@ -1088,6 +1766,8 @@ class MainWindow(QMainWindow):
         self.btn_write.setEnabled(not busy and self.findings is not None)
         self.btn_render.setEnabled(not busy and self.plan is not None)
         self.btn_cancel.setVisible(busy)
+        self.btn_make.setEnabled(not busy)
+        self.btn_cancel2.setVisible(busy)
 
     def mark_stage(self, i, n, label):
         for k, l in enumerate(self.step_labels):
@@ -1100,7 +1780,8 @@ class MainWindow(QMainWindow):
             i, n = 1, 1  # tek aşamalı işler: dağın tamamı bu iş
         self._stage = (i, max(1, n))
         self.wait.set_stage(label)
-        self.wait.set_progress((i - 1) / max(1, n))
+        b, w = self._span()
+        self.wait.set_progress(b + w * (i - 1) / max(1, n))
 
     def append_log(self, s):
         self.log.appendPlainText(s)
@@ -1112,16 +1793,10 @@ class MainWindow(QMainWindow):
 
     def save_settings(self):
         s = self.settings
-        s.setValue("prompt", self.prompt.toPlainText())
-        s.setValue("voice_idx", self.voice.currentIndex())
-        s.setValue("music", self.music.text())
-        s.setValue("music_mode", self.music_mode.currentData())
-        s.setValue("sfx", self.sfx.value())
-        s.setValue("vertical", self.vert.value())
+        s.setValue("prompt", (self.simple_prompt if getattr(self, "simple", False) else self.prompt).toPlainText())
+        s.setValue("options", json.dumps(self.get_options(), ensure_ascii=False))
         s.setValue("outdir", self.outdir.text())
         s.setValue("model", self.model.currentText())
-        s.setValue("length", self.length.value())
-        s.setValue("subs", self.subs.value())
 
     # ---- iş akışı ----
     def start_research(self):
@@ -1134,8 +1809,8 @@ class MainWindow(QMainWindow):
         self.plan_dir = os.path.join(self.outdir.text(), f"{stamp}-{slugify(prompt)}")
         self.research_prompt = prompt
         self.log.clear()
-        self.tabs.setCurrentIndex(0)
-        self.worker = Worker("research", prompt=prompt, out_dir=self.plan_dir)
+        self.tabs.setCurrentWidget(self.tab_preview)
+        self.worker = Worker("research", prompt=prompt, out_dir=self.plan_dir, opts={"lang": self.lang.value()})
         self._wire(self.worker)
         self.worker.researched.connect(self.on_researched)
         self.set_busy(True)
@@ -1149,9 +1824,12 @@ class MainWindow(QMainWindow):
         self.set_busy(False)
         self.populate_findings()
         self.bar.setValue(1000)
+        if self.auto_chain:
+            self.start_plan()
+            return
         self.status.setText(f"Araştırma bitti: {len(findings)} bilgi bulundu. İstemediklerinizin işaretini "
                             f"kaldırıp “Senaryoyu yaz”a basın.")
-        self.tabs.setCurrentIndex(1)
+        self.tabs.setCurrentWidget(self.tab_research)
 
     def start_plan(self):
         if self.findings is None:
@@ -1161,9 +1839,10 @@ class MainWindow(QMainWindow):
         planner.MODEL = self.model.currentText().strip() or planner.MODEL
         prompt = getattr(self, "research_prompt", None) or self.prompt.toPlainText().strip()
         self.log.clear()
-        self.tabs.setCurrentIndex(0)
+        self.tabs.setCurrentWidget(self.tab_preview)
         self.worker = Worker("plan", prompt=prompt, out_dir=self.plan_dir, findings=self.findings,
-                             opts={"length": self.length.value()})
+                             opts={"length": self.length.value(), "lang": self.lang.value(),
+                                   "kind": self.kind_combo.currentData()})
         self._wire(self.worker)
         self.worker.planned.connect(self.on_planned)
         self.set_busy(True)
@@ -1175,10 +1854,14 @@ class MainWindow(QMainWindow):
         self.commit_scene_silently()
         self.save_settings()
         self.write_plan()
-        opts = {"style": self.style, "voice": self.voice.currentData(), "music": self.music_choice(),
+        style, accent, bg = self.look()
+        opts = {"style": style, "accent": accent, "bg": bg, "voice": self.voice.currentData(),
+                "music": self.music_choice(), "music_vol": self.music_vol.value() / 100,
                 "sfx": self.sfx.value() == "1", "vertical": self.vert.value() == "1",
-                "subtitles": self.subs.value() == "1"}
-        self.tabs.setCurrentIndex(0)
+                "square": self.square.value() == "1", "subtitles": self.subs.value() == "1",
+                "sub_opts": self.sub_opts(), "quality": self.quality.value(), "fps": int(self.fps.value()),
+                "tempo": self.tempo.value(), "lang": self.plan.get("language") or self.lang.value()}
+        self.tabs.setCurrentWidget(self.tab_preview)
         self.worker = Worker("render", plan=self.plan, out_dir=self.plan_dir, opts=opts)
         self._wire(self.worker)
         self.worker.finished_ok.connect(self.on_rendered)
@@ -1195,7 +1878,8 @@ class MainWindow(QMainWindow):
     def on_progress(self, f):
         self.bar.setValue(int(f * 1000))
         i, n = getattr(self, "_stage", (1, 1))
-        self.wait.set_progress((i - 1 + f) / n)  # bütün işin ilerlemesi: adamın yamaçtaki yeri
+        b, w = self._span()
+        self.wait.set_progress(b + w * (i - 1 + f) / n)  # bütün işin ilerlemesi: adamın yamaçtaki yeri
 
     def cancel(self):
         if self.worker:
@@ -1211,9 +1895,13 @@ class MainWindow(QMainWindow):
                  else ("  ·  tüm sayılar kaynaklarda doğrulandı ✓" if chk else ""))
         self.status.setText(f"Senaryo hazır: {len(plan.get('scenes', []))} sahne{extra}")
         self.bar.setValue(1000)
-        self.tabs.setCurrentIndex(2)
+        if self.auto_chain:
+            self.start_render()
+            return
+        self.tabs.setCurrentWidget(self.tab_editor)
 
     def on_rendered(self, path):
+        self.auto_chain = False
         self.set_busy(False)
         self.last_video = path
         self.btn_open.setEnabled(True)
@@ -1227,6 +1915,7 @@ class MainWindow(QMainWindow):
         self.refresh_library()
 
     def on_failed(self, msg):
+        self.auto_chain = False
         self.set_busy(False)
         self.status.setText(f"Durdu: {msg}")
         if msg != "İptal edildi.":
@@ -1242,7 +1931,11 @@ class MainWindow(QMainWindow):
             name = sc.get("title") or sc.get("caption") or sc.get("label") or ""
             chk = sc.get("check") or {}
             mark = "  ⚠" if chk.get("missing") else ("  ✓" if chk.get("verified") else "")
-            it = QListWidgetItem(f"{SCENE_ICONS.get(t, '•')}  {i + 1}. {SCENE_TYPES.get(t, t)}{mark}\n     {name[:34]}")
+            dot = "  ●" if sc.get("accent") else ""
+            it = QListWidgetItem(f"{SCENE_ICONS.get(t, '•')}  {i + 1}. {SCENE_TYPES.get(t, t)}{mark}{dot}\n     {name[:34]}")
+            it.setData(Qt.UserRole, i)
+            if sc.get("accent"):
+                it.setForeground(QColor(sc["accent"]))
             self.scene_list.addItem(it)
         self.scene_list.blockSignals(False)
         if self.scene_list.count():
@@ -1262,11 +1955,12 @@ class MainWindow(QMainWindow):
         self.f_title.setText(sc.get("title") or sc.get("caption") or "")
         self.f_narr.setPlainText(sc.get("narration", ""))
         self.f_dur.setValue(float(sc.get("duration") or 0))
+        self.f_accent.set_value(sc.get("accent", ""))
         rest = {k: v for k, v in sc.items() if k not in COMMON_KEYS and k not in ("caption", "check") and not k.startswith("_")}
         self.f_data.setPlainText(json.dumps(rest, ensure_ascii=False, indent=2))
         self.edit_msg.setText("")
         self.show_check(sc)
-        self.scene_preview.setPixmap(pil_to_pixmap(render_still(sc, self.style, size=(533, 300))))
+        self.scene_preview.setPixmap(pil_to_pixmap(render_still(sc, self.style, None, (533, 300), *self.look()[1:])))
 
     def show_check(self, sc):
         c = sc.get("check")
@@ -1291,6 +1985,8 @@ class MainWindow(QMainWindow):
             sc["narration"] = self.f_narr.toPlainText().strip()
         if self.f_dur.value() > 0:
             sc["duration"] = self.f_dur.value()
+        if self.f_accent.value():
+            sc["accent"] = self.f_accent.value()
         return sc
 
     def save_scene(self, preview_only=False):
@@ -1303,7 +1999,7 @@ class MainWindow(QMainWindow):
             self.edit_msg.setText(f"<span style='color:#FF4D1A'>Veriler alanında JSON hatası: {e}</span>")
             return
         if not self.busy():
-            self.scene_preview.setPixmap(pil_to_pixmap(render_still(sc, self.style, size=(533, 300))))
+            self.scene_preview.setPixmap(pil_to_pixmap(render_still(sc, self.style, None, (533, 300), *self.look()[1:])))
         if preview_only:
             self.edit_msg.setText("Önizleme güncellendi (henüz kaydedilmedi).")
             return
@@ -1346,6 +2042,26 @@ class MainWindow(QMainWindow):
         if 0 <= row < len(sc) and 0 <= row + d < len(sc):
             sc[row], sc[row + d] = sc[row + d], sc[row]
             self.populate_scenes(row + d)
+
+    def on_scenes_dragged(self):
+        """Sürükle-bırak sonrası planın sahne sırasını listedeki yeni sıraya uydurur."""
+        if not self.plan:
+            return
+        order = [self.scene_list.item(i).data(Qt.UserRole) for i in range(self.scene_list.count())]
+        old = self.plan["scenes"]
+        if sorted(order) != list(range(len(old))) or order == list(range(len(old))):
+            return
+        cur = self.scene_list.currentRow()
+        self.plan["scenes"] = [old[i] for i in order]
+        self.write_plan()
+        self.populate_scenes(max(0, cur))
+
+    def duplicate_scene(self):
+        row = self.scene_list.currentRow()
+        if self.plan and 0 <= row < len(self.plan["scenes"]):
+            self.commit_scene_silently()
+            self.plan["scenes"].insert(row + 1, json.loads(json.dumps(self.plan["scenes"][row])))
+            self.populate_scenes(row + 1)
 
     def remove_scene(self):
         row = self.scene_list.currentRow()
@@ -1397,7 +2113,7 @@ class MainWindow(QMainWindow):
         self.populate_scenes()
         self.btn_render.setEnabled(True)
         self.btn_plan.setEnabled(bool(self.findings))
-        self.tabs.setCurrentIndex(2)
+        self.tabs.setCurrentWidget(self.tab_editor)
 
     def closeEvent(self, e):
         self.save_settings()
@@ -1416,13 +2132,15 @@ def run_app():
     icon = os.path.join(HERE, "assets", "icon.png")
     if os.path.exists(icon):
         app.setWindowIcon(QIcon(icon))
+    st = QSettings("DARKROOM", "DARKROOM")
+    set_app_theme(st.value("app_mode", "koyu"), st.value("app_accent", "turuncu"))
     app.setStyleSheet(app_stylesheet())
-    if os.environ.get("PV_NO_SPLASH"):
+    if os.environ.get("PV_NO_SPLASH") or st.value("splash", "1") == "0":
         w = MainWindow()
         w.show()
         return app.exec()
     from .splash import Splash
-    sp = Splash(__version__, sound=not os.environ.get("PV_SPLASH_MUTE"))
+    sp = Splash(__version__, sound=not os.environ.get("PV_SPLASH_MUTE") and st.value("splash_sound", "1") != "0")
     sp.start()
     app.processEvents()
     w = MainWindow()  # açılış efekti oynarken ana pencere arkada hazırlanır

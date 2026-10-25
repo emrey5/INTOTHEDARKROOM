@@ -12,9 +12,19 @@ from .theme import W, H, clamp, mix, lerp, prog, ease_out_cubic, ease_out_back, 
 BOIL = 0  # çizgi stilinde "titreyen çizgi" tohumu; her birkaç karede bir değişir
 
 
-def new_surface():
-    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, W, H)
-    return surf, cairo.Context(surf)
+def new_surface(scale=None):
+    """Çıktı boyutunda yüzey; bağlam tasarım alanına (1920x1080) ölçeklenir, çizimler hep keskin kalır."""
+    global _K
+    k = th.SCALE if scale is None else scale
+    _K = k
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(round(W * k / 2)) * 2, int(round(H * k / 2)) * 2)
+    ctx = cairo.Context(surf)
+    if k != 1:
+        ctx.scale(surf.get_width() / W, surf.get_height() / H)
+    return surf, ctx
+
+
+_K = 1.0  # son açılan yüzeyin ölçeği: metin maskeleri bu çözünürlükte üretilir
 
 
 # --- Metin -------------------------------------------------------------------
@@ -41,7 +51,7 @@ def text_width(s, size, kind="body"):
 
 
 def _mask(s, size, kind, stroke=0):
-    """Metnin alfa maskesi (cairo A8) ve taban çizgisine göre ofseti."""
+    """Metnin alfa maskesi (cairo A8) ve taban çizgisine göre ofseti (maskenin kendi pikselinde)."""
     key = (s, int(size), kind, th.STYLE, stroke)
     m = _masks.get(key)
     if m:
@@ -67,7 +77,12 @@ def _mask(s, size, kind, stroke=0):
 
 
 def _paint_mask(ctx, s, x, y, size, kind, source, alpha, stroke=0):
-    surf, ox, oy, _ = _mask(s, size, kind, stroke)
+    k = _K  # 4K'da metin büyük boyutta üretilir, bulanıklaşmaz
+    surf, ox, oy, _ = _mask(s, size * k, kind, int(round(stroke * k)))
+    mask = cairo.SurfacePattern(surf)
+    mask.set_matrix(cairo.Matrix(k, 0, 0, k, -(x * k + ox), -(y * k + oy)))
+    if k != 1:
+        mask.set_filter(cairo.FILTER_GOOD)
     ctx.save()
     if isinstance(source, cairo.Pattern):
         ctx.set_source(source)
@@ -76,11 +91,11 @@ def _paint_mask(ctx, s, x, y, size, kind, source, alpha, stroke=0):
     if alpha < 1 and isinstance(source, cairo.Pattern):
         ctx.push_group()
         ctx.set_source(source)
-        ctx.mask_surface(surf, x + ox, y + oy)
+        ctx.mask(mask)
         ctx.pop_group_to_source()
         ctx.paint_with_alpha(alpha)
     else:
-        ctx.mask_surface(surf, x + ox, y + oy)
+        ctx.mask(mask)
     ctx.restore()
 
 
@@ -326,7 +341,7 @@ def card(ctx, x, y, w, h, alpha=1.0, key=0, fill=None):
     if th.SKETCH:
         rough_rect(ctx, x, y, w, h, fill=fill or (1, 1, 1), width=4, key=key, shadow=8, alpha=alpha)
     else:
-        ctx.set_source_rgba(*(fill or (1, 1, 1)), 0.05 * alpha if not fill else alpha)
+        ctx.set_source_rgba(*(fill or th.GLASS), 0.05 * alpha if not fill else alpha)
         round_rect(ctx, x, y, w, h, 24)
         ctx.fill()
 
@@ -348,8 +363,10 @@ def _paper_surface():
     """Kâğıt dokusu: bir kez üretilir, statik olduğu için video boyutunu büyütmez."""
     global _paper
     if _paper is None:
-        _paper = cairo.ImageSurface(cairo.FORMAT_ARGB32, W, H)
+        k = max(1.0, th.SCALE)
+        _paper = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(W * k), int(H * k))
         c = cairo.Context(_paper)
+        c.scale(k, k)
         g = cairo.RadialGradient(W / 2, H / 2, H * 0.2, W / 2, H / 2, W * 0.75)
         g.add_color_stop_rgb(0, *th.BG)
         g.add_color_stop_rgb(1, *th.BG2)
@@ -411,8 +428,12 @@ def _doodle(ctx, kind, x, y, s, key):
 def background(ctx, gt):
     """gt: videonun genel zamanı (sahneler arası kesintisiz hareket için)."""
     if th.SKETCH:
-        ctx.set_source_surface(_paper_surface(), 0, 0)
+        paper = _paper_surface()
+        ctx.save()
+        ctx.scale(W / paper.get_width(), H / paper.get_height())
+        ctx.set_source_surface(paper, 0, 0)
         ctx.paint()
+        ctx.restore()
         for kind, fx, fy, s, ph, key in _DOODLES:
             # orta alanı içerik için boş bırak
             if 0.12 < fx < 0.88 and 0.2 < fy < 0.85:
@@ -456,7 +477,7 @@ def background(ctx, gt):
         ctx.fill()
     v = cairo.RadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, W * 0.75)
     v.add_color_stop_rgba(0, 0, 0, 0, 0)
-    v.add_color_stop_rgba(1, 0, 0, 0, 0.55)
+    v.add_color_stop_rgba(1, 0, 0, 0, 0.12 if th.LIGHT else 0.55)
     ctx.set_source(v)
     ctx.paint()
 
@@ -609,7 +630,7 @@ def footer_source(ctx, source, t):
     if not source:
         return
     a = clamp((t - 0.8) / 0.6) * 0.85
-    if SUBS:  # alt şeridi altyazı kullanıyor, kaynak sağ üste çıkar
+    if SUBS and SUB_OPTS.get("pos") != "ust":  # alt şeridi altyazı kullanıyor, kaynak sağ üste çıkar
         draw_text(ctx, f"Kaynak: {source}", W - 60, 58, 22, mix(th.TEXT, th.BG, 0.4), alpha=a, align="right")
     elif th.SKETCH:
         draw_text(ctx, f"Kaynak: {source}", 140, H - 60, 30, th.MUTED, alpha=a, kind="hand")
@@ -620,6 +641,9 @@ def footer_source(ctx, source, t):
 # --- Altyazı -----------------------------------------------------------------
 
 SUBS = False  # bu karede altyazı çiziliyor mu (kaynak yazısının yeri buna göre değişir)
+# altyazı görünümü: boyut (piksel), konum ("alt" / "ust"), kutu ("kutu" / "golge" / "vurgu")
+SUB_OPTS = {"size": 42, "pos": "alt", "box": "kutu"}
+SUB_SIZES = {"kucuk": 34, "orta": 42, "buyuk": 54}
 
 def subtitle_chunks(text, size=42, max_w=1500, per=2):
     """Anlatımı ekrana sığan, en fazla `per` satırlık parçalara böler."""
@@ -627,8 +651,9 @@ def subtitle_chunks(text, size=42, max_w=1500, per=2):
     return [lines[i:i + per] for i in range(0, len(lines), per)]
 
 
-def subtitle(ctx, text, t, start, speech, size=42):
-    """Anlatımı konuşma süresine yayılmış parçalar halinde alt şeritte gösterir."""
+def subtitle(ctx, text, t, start, speech, size=None):
+    """Anlatımı konuşma süresine yayılmış parçalar halinde alt (ya da üst) şeritte gösterir."""
+    size = size or SUB_OPTS.get("size", 42)
     chunks = subtitle_chunks(text, size)
     if not chunks or speech <= 0:
         return
@@ -647,12 +672,26 @@ def subtitle(ctx, text, t, start, speech, size=42):
     lh = size * 1.3
     w = max(text_width(l, size, "bold") for l in c) + 64
     h = lh * len(c) + 30
-    x, y = (W - w) / 2, H - 36 - h
-    ctx.set_source_rgba(0.02, 0.02, 0.02, 0.88 * a)
-    round_rect(ctx, x, y, w, h, 6)
-    ctx.fill()
-    ctx.set_source_rgba(*th.ACCENT, a)
-    ctx.rectangle(x, y, 5, h)
-    ctx.fill()
+    x, y = (W - w) / 2, (28 if SUB_OPTS.get("pos") == "ust" else H - 36 - h)
+    box = SUB_OPTS.get("box", "kutu")
+    col, shadow = (0.96, 0.93, 0.88), None
+    if box == "kutu":
+        ctx.set_source_rgba(0.02, 0.02, 0.02, 0.88 * a)
+        round_rect(ctx, x, y, w, h, 6)
+        ctx.fill()
+        ctx.set_source_rgba(*th.ACCENT, a)
+        ctx.rectangle(x, y, 5, h)
+        ctx.fill()
+    elif box == "vurgu":
+        ctx.set_source_rgba(*th.ACCENT, 0.95 * a)
+        round_rect(ctx, x, y, w, h, 10)
+        ctx.fill()
+        col = (0.04, 0.04, 0.04) if th.luma(th.ACCENT) > 0.5 else (1, 1, 1)
+    else:  # kutusuz, gölgeli yazı
+        shadow = True
     for i, l in enumerate(c):
-        draw_text(ctx, l, W / 2, y + 15 + lh * i + size * 0.98, size, (0.96, 0.93, 0.88), a, "bold", "center")
+        by = y + 15 + lh * i + size * 0.98
+        if shadow:
+            for dx, dy in ((3, 3), (-2, 2), (2, -2), (-2, -2), (0, 4)):
+                draw_text(ctx, l, W / 2 + dx, by + dy, size, (0, 0, 0), a * 0.75, "bold", "center")
+        draw_text(ctx, l, W / 2, by, size, col, a, "bold", "center")
