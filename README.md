@@ -20,7 +20,14 @@ ffmpeg ayrıca kurulmaz, uygulamanın içinde gelir.
 dosyasını derlerseniz başkalarına verebileceğiniz `DARKROOM-Kurulum.exe` çıkar.
 Kurulumu denemek için: `DARKROOM.exe --selftest deneme` (2 sahnelik deneme videosu çizer).
 
-Uygulamada:
+**Basit mod (açılışta):** tek kutuya nasıl bir video istediğini yaz, **▶ VİDEOYU YAP**'a bas. Program
+yazdığından stili, müziği, tempoyu, süreyi, formatı (Shorts, Instagram), dili, sesi ve rengi kendisi seçer,
+seçtiklerini kutunun altında gösterir; araştırma, senaryo ve video kendiliğinden art arda yapılır.
+Örnekler: "Shorts için kısa bir video: Kahvenin dünyaya yayılış hikâyesi", "Osmanlı İmparatorluğu'nun
+yükselişi, detaylı, 4K", "Çözülemeyen cinayetler, kadın sesiyle". Her şeyi elle seçmek ya da senaryoyu
+düzenlemek için sağ üstteki **⚙ Gelişmiş mod**.
+
+Gelişmiş modda:
 - **Konu** kutusuna videonun konusunu yazın ya da örneklerden birine tıklayın.
 - **Hazır stiller**: Belgesel, Haber, Sosyal, Minimal, DARKROOM, Çizgi film. Tek tıkla görünümü, müziği,
   tempoyu, altyazıyı ve ek formatları birlikte ayarlar.

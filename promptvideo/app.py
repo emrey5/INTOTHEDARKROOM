@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from . import theme, pipeline, planner, scenes, updater, userdata, __version__
 from .waitscreen import WaitScreen
-from . import ollama_setup
+from . import ollama_setup, autoset
 from . import draw as D
 from .render import render_frame
 
@@ -607,10 +607,13 @@ class MainWindow(QMainWindow):
         lay = QHBoxLayout(root)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        lay.addWidget(self._build_sidebar())
+        self.side = self._build_sidebar()
+        lay.addWidget(self.side)
         lay.addWidget(self._build_main(), 1)
+        self.auto_chain = False  # basit mod: araştır -> senaryo -> video kendiliğinden
 
         self.set_options(self._saved_options())
+        self.set_simple(self.settings.value("simple", "1") == "1")
         self.refresh_profiles()
         self.check_ollama()
         QTimer.singleShot(1500, self.check_updates)
@@ -783,8 +786,105 @@ class MainWindow(QMainWindow):
         l.setContentsMargins(24, 12, 24, 20)
         l.addWidget(self._build_update_banner())
         l.addWidget(self._build_ai_banner())
+        l.addWidget(self._build_simple_panel())
         l.addWidget(self.tabs)
         return w
+
+    # ---- basit mod: tek kutu, tek düğme; ayarları prompt belirler ----
+    def _build_simple_panel(self):
+        self.simple_panel = QWidget()
+        v = QVBoxLayout(self.simple_panel)
+        v.setContentsMargins(0, 8, 0, 4)
+        v.setSpacing(8)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("▌DARKROOM", objectName="brand"))
+        top.addWidget(QLabel("  credit by EC", objectName="brandsub"))
+        top.addStretch(1)
+        adv = QPushButton("⚙ GELİŞMİŞ MOD", objectName="chip")
+        adv.setToolTip("Bütün ayarları elle seçmek, senaryoyu düzenlemek için")
+        adv.clicked.connect(lambda: self.set_simple(False))
+        top.addWidget(adv)
+        v.addLayout(top)
+        row = QHBoxLayout()
+        self.simple_prompt = QPlainTextEdit()
+        self.simple_prompt.setPlaceholderText(
+            "Nasıl bir video istediğini yaz, gerisini program seçsin…\n"
+            "ör. Shorts için kısa bir video: Kahvenin dünyaya yayılış hikâyesi\n"
+            "ör. Osmanlı İmparatorluğu'nun yükselişi, detaylı, epik müzikli, 4K")
+        self.simple_prompt.setFixedHeight(92)
+        self.simple_prompt.setPlainText(self.settings.value("prompt", ""))
+        self.simple_prompt.textChanged.connect(lambda: self._auto_timer.start(250))
+        row.addWidget(self.simple_prompt, 1)
+        col = QVBoxLayout()
+        self.btn_make = QPushButton("▶  VİDEOYU YAP", objectName="primary")
+        self.btn_make.setMinimumWidth(230)
+        self.btn_make.setMinimumHeight(60)
+        self.btn_make.clicked.connect(self.start_auto)
+        col.addWidget(self.btn_make)
+        self.btn_cancel2 = QPushButton("■ İPTAL", objectName="danger")
+        self.btn_cancel2.clicked.connect(self.cancel)
+        self.btn_cancel2.hide()
+        col.addWidget(self.btn_cancel2)
+        col.addStretch(1)
+        row.addLayout(col)
+        v.addLayout(row)
+        ex = QHBoxLayout()
+        for e in ("Shorts için kısa bir video: Kahvenin dünyaya yayılış hikâyesi",
+                  "Osmanlı İmparatorluğu'nun yükselişi, detaylı",
+                  "Avrupa'da enflasyon: Türkiye, Almanya, Fransa"):
+            b = QPushButton("↳ " + e, objectName="chip")
+            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            b.setToolTip(e)
+            b.clicked.connect(lambda _=False, t=e: self.simple_prompt.setPlainText(t))
+            ex.addWidget(b)
+        v.addLayout(ex)
+        self.auto_info = QLabel("", objectName="status")
+        self.auto_info.setWordWrap(True)
+        v.addWidget(self.auto_info)
+        self._auto_timer = QTimer(self)
+        self._auto_timer.setSingleShot(True)
+        self._auto_timer.timeout.connect(self.update_auto_info)
+        return self.simple_panel
+
+    def set_simple(self, on):
+        self.simple = on
+        self.settings.setValue("simple", "1" if on else "0")
+        self.side.setVisible(not on)
+        self.simple_panel.setVisible(on)
+        self.tabs.tabBar().setVisible(not on)
+        if not self.last_video and not self.busy():
+            self.preview.setText("> Ne istediğini yaz,  [ VİDEOYU YAP ]  düğmesine bas_" if on else
+                                 "> Bir konu yazıp  [ ARAŞTIR ]  düğmesine basın_")
+        if on:
+            self.simple_prompt.setPlainText(self.prompt.toPlainText())
+            self.tabs.setCurrentWidget(self.tab_preview)
+            self.update_auto_info()
+        else:
+            self.prompt.setPlainText(self.simple_prompt.toPlainText())
+
+    def update_auto_info(self):
+        text = self.simple_prompt.toPlainText().strip()
+        if not text:
+            self.auto_info.setText("Program yazdığına göre stili, müziği, süreyi ve formatı kendisi seçer.")
+            return
+        _, why, topic = autoset.infer(text)
+        self.auto_info.setText(f"KONU ▸ {topic}\nSEÇİLENLER ▸ " + "  ·  ".join(why))
+
+    def start_auto(self):
+        text = self.simple_prompt.toPlainText().strip()
+        if not text:
+            QMessageBox.information(self, APP_NAME, "Önce nasıl bir video istediğini yaz.")
+            return
+        if self.busy():
+            return
+        opts, why, topic = autoset.infer(text)
+        self.set_options(opts)
+        self.prompt.setPlainText(topic)
+        self.findings, self.plan = None, None
+        self.auto_chain = True
+        self.log.clear()
+        self.append_log("Seçilen ayarlar: " + " · ".join(why))
+        self.start_research()
 
     def _build_ai_banner(self):
         """Senaryo yapay zekâsı hazır değilse üstte görünür; tek tıkla kurulum ve ilerleme burada."""
@@ -1600,11 +1700,23 @@ class MainWindow(QMainWindow):
             self.ai_status.setText(f"<span style='color:#FF4D1A'>■ Hazırlanamadı:</span> {why}")
             self.ai_banner_text.setText(f"HAZIRLANAMADI: {why}")
 
+    # tek düğmeli akışta her işin dağdaki payı: (başlangıç, genişlik)
+    AUTO_SPAN = {"research": (0.0, 0.12), "plan": (0.12, 0.13), "render": (0.25, 0.75)}
+
+    def _span(self):
+        if self.auto_chain and self.worker:
+            return self.AUTO_SPAN.get(self.worker.mode, (0.0, 1.0))
+        return 0.0, 1.0
+
     def set_busy(self, busy):
-        if busy:
+        if self.auto_chain and self.worker and self.worker.mode != "research" and busy:
+            self._stage = (1, 1)  # akış sürüyor: bekleme ekranı baştan başlamasın
+        elif busy:
             self._stage = (1, 1)
             self.wait.start(self.status.text().rstrip("…") if self.status.text() != "SİSTEM HAZIR" else "")
             self.preview_stack.setCurrentWidget(self.wait)
+        elif self.auto_chain:
+            pass  # bir sonraki adım hemen başlayacak
         else:
             self.wait.stop()
             self.preview_stack.setCurrentWidget(self.preview)
@@ -1613,6 +1725,8 @@ class MainWindow(QMainWindow):
         self.btn_write.setEnabled(not busy and self.findings is not None)
         self.btn_render.setEnabled(not busy and self.plan is not None)
         self.btn_cancel.setVisible(busy)
+        self.btn_make.setEnabled(not busy)
+        self.btn_cancel2.setVisible(busy)
 
     def mark_stage(self, i, n, label):
         for k, l in enumerate(self.step_labels):
@@ -1625,7 +1739,8 @@ class MainWindow(QMainWindow):
             i, n = 1, 1  # tek aşamalı işler: dağın tamamı bu iş
         self._stage = (i, max(1, n))
         self.wait.set_stage(label)
-        self.wait.set_progress((i - 1) / max(1, n))
+        b, w = self._span()
+        self.wait.set_progress(b + w * (i - 1) / max(1, n))
 
     def append_log(self, s):
         self.log.appendPlainText(s)
@@ -1637,7 +1752,7 @@ class MainWindow(QMainWindow):
 
     def save_settings(self):
         s = self.settings
-        s.setValue("prompt", self.prompt.toPlainText())
+        s.setValue("prompt", (self.simple_prompt if getattr(self, "simple", False) else self.prompt).toPlainText())
         s.setValue("options", json.dumps(self.get_options(), ensure_ascii=False))
         s.setValue("outdir", self.outdir.text())
         s.setValue("model", self.model.currentText())
@@ -1668,6 +1783,9 @@ class MainWindow(QMainWindow):
         self.set_busy(False)
         self.populate_findings()
         self.bar.setValue(1000)
+        if self.auto_chain:
+            self.start_plan()
+            return
         self.status.setText(f"Araştırma bitti: {len(findings)} bilgi bulundu. İstemediklerinizin işaretini "
                             f"kaldırıp “Senaryoyu yaz”a basın.")
         self.tabs.setCurrentWidget(self.tab_research)
@@ -1718,7 +1836,8 @@ class MainWindow(QMainWindow):
     def on_progress(self, f):
         self.bar.setValue(int(f * 1000))
         i, n = getattr(self, "_stage", (1, 1))
-        self.wait.set_progress((i - 1 + f) / n)  # bütün işin ilerlemesi: adamın yamaçtaki yeri
+        b, w = self._span()
+        self.wait.set_progress(b + w * (i - 1 + f) / n)  # bütün işin ilerlemesi: adamın yamaçtaki yeri
 
     def cancel(self):
         if self.worker:
@@ -1734,9 +1853,13 @@ class MainWindow(QMainWindow):
                  else ("  ·  tüm sayılar kaynaklarda doğrulandı ✓" if chk else ""))
         self.status.setText(f"Senaryo hazır: {len(plan.get('scenes', []))} sahne{extra}")
         self.bar.setValue(1000)
+        if self.auto_chain:
+            self.start_render()
+            return
         self.tabs.setCurrentWidget(self.tab_editor)
 
     def on_rendered(self, path):
+        self.auto_chain = False
         self.set_busy(False)
         self.last_video = path
         self.btn_open.setEnabled(True)
@@ -1750,6 +1873,7 @@ class MainWindow(QMainWindow):
         self.refresh_library()
 
     def on_failed(self, msg):
+        self.auto_chain = False
         self.set_busy(False)
         self.status.setText(f"Durdu: {msg}")
         if msg != "İptal edildi.":
