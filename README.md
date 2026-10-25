@@ -24,10 +24,13 @@ Uygulamada:
 - **Konu** kutusuna videonun konusunu yazın ya da örneklerden birine tıklayın.
 - **Video süresi**: Kısa (~30 sn), Orta (~1 dk) ya da Uzun (~2 dk). Yapay zekâ sahne sayısını buna göre ayarlar.
 - **Altyazı**: "Videoya yaz" seçiliyse anlatım, konuşmayla eşzamanlı olarak alt şeritte görünür. Ayrı `altyazi.srt` dosyası her zaman oluşur.
-- **1 · Senaryoyu hazırla**: webde araştırır ve sahneleri yazar, sonra Senaryo sekmesi açılır.
+- **1 · Araştır**: Wikipedia, Wikidata, Dünya Bankası, Our World in Data, IMF ve web aramasından bilgi toplar.
+  **Araştırma** sekmesinde her bilgiyi kaynağıyla görürsünüz; istemediklerinizin işaretini kaldırın.
+- **2 · Senaryoyu yaz**: yalnızca işaretli bilgilerden sahneleri yazar. Ardından **doğruluk kontrolü**
+  senaryodaki her sayıyı kaynaklarda arar: bulunanlar ✓, bulunamayanlar ⚠ ile işaretlenir.
 - **Senaryo** sekmesi: sahneleri ekleyin, silin, sıralayın; başlık, anlatım ve verileri düzeltin,
   "Önizle" ile anında görün.
-- **2 · Videoyu oluştur**: çizim sırasında kareler canlı önizlenir; bitince "Videoyu aç".
+- **3 · Videoyu oluştur**: çizim sırasında kareler canlı önizlenir; bitince "Videoyu aç".
 - **Videolarım**: önceki videolar; eski bir senaryoyu açıp yeniden çizebilirsiniz.
 
 ## Komut satırı
@@ -45,7 +48,8 @@ titreyen çizgiler, doodle'lar, el yazısı notlar) ve `--style modern` (koyu, p
 
 | Adım | Ne yapar | Ücretsiz araç |
 |---|---|---|
-| 1. Araştırma | Konuyu Wikipedia'da bulur (özet + tablolar), DuckDuckGo'da arar, ilk sayfaları okur, ülke istatistiği istenirse Dünya Bankası'ndan çeker | Wikipedia API, `ddgs`, World Bank Open Data |
+| 1. Araştırma | Konuyu Wikipedia'da bulur (özet + tablolar), Wikidata'dan kesin bilgileri (nüfus, alan, tarihler, kişiler) alır, DuckDuckGo'da arar ve ilk sayfaları okur; konuya göre Dünya Bankası, Our World in Data (yaşam süresi, CO₂, enerji, mutluluk… 24 gösterge) ve IMF (büyüme, enflasyon, borç; tahminler dahil) verisini çeker | Wikipedia/Wikidata API, `ddgs`, World Bank, OWID, IMF DataMapper (hepsi anahtarsız) |
+| 1b. Doğrulama | Senaryo yazıldıktan sonra her sayı (grafik değerleri, tablo hücreleri, anlatımdaki rakamlar) seçili kaynaklarda aranır | `factcheck.py` |
 | 2. Senaryo | Araştırma notlarından 6-10 sahnelik plan yazar; sayıları sadece notlardan alır | **Ollama** ile bilgisayarınızda çalışan açık kaynak model (varsayılan `qwen3:8b`). Ollama yoksa kural tabanlı planlayıcı |
 | 3. Medya | Görseller ve özgür lisanslı videolar | Wikimedia Commons (anahtarsız), isterseniz Pexels (ücretsiz anahtar) |
 | 4. Ses | Doğal Türkçe seslendirme | `edge-tts` (tr-TR-AhmetNeural / EmelNeural), yedek gTTS |

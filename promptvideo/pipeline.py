@@ -99,19 +99,57 @@ def srt_time(s):
 
 
 
-def create_plan(prompt, out_dir, lang="tr", cb=None, length="orta"):
-    """Araştırıp planı oluşturur, out_dir/plan.json olarak kaydeder ve döner."""
+def research_topic(prompt, out_dir, lang="tr", cb=None):
+    """Webde araştırır; bulguları out_dir/research.json olarak kaydeder ve döner."""
+    global _cb
+    _cb = cb or Callbacks()
+    from .research import gather
+    os.makedirs(out_dir, exist_ok=True)
+    _cb.stage(1, 5, "Araştırma")
+    findings = gather(prompt, lang, log)
+    save_findings(findings, out_dir)
+    return findings
+
+
+def save_findings(findings, out_dir):
+    with open(os.path.join(out_dir, "research.json"), "w", encoding="utf-8") as f:
+        json.dump(findings, f, ensure_ascii=False, indent=2)
+
+
+def load_findings(out_dir):
+    p = os.path.join(out_dir, "research.json")
+    if os.path.exists(p):
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+
+def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta"):
+    """Seçili bulgulardan senaryoyu yazar, sayıları doğrular, out_dir/plan.json olarak kaydeder."""
     global _cb
     _cb = cb or Callbacks()
     from .planner import make_plan
+    from .factcheck import check_plan
     os.makedirs(out_dir, exist_ok=True)
-    _cb.stage(1, 5, "Araştırma ve senaryo")
-    plan = make_plan(prompt, lang, log, length)
+    _cb.stage(1, 5, "Senaryo yazılıyor")
+    plan = make_plan(prompt, lang, log, length, findings)
     plan.setdefault("prompt", prompt)
+    chk = check_plan(plan, findings)
+    if chk:
+        log(f"Doğruluk kontrolü: {chk['verified']} sayı kaynaklarda bulundu, {chk['missing']} sayı bulunamadı.")
+        for i, sc in enumerate(plan["scenes"]):
+            if sc.get("check", {}).get("missing"):
+                log(f"  ⚠ Sahne {i + 1}: kaynakta yok → {', '.join(sc['check']['missing'])}")
     with open(os.path.join(out_dir, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, ensure_ascii=False, indent=2)
     log(f"Plan kaydedildi: {os.path.join(out_dir, 'plan.json')} ({len(plan.get('scenes', []))} sahne)")
     return plan
+
+
+def create_plan(prompt, out_dir, lang="tr", cb=None, length="orta"):
+    """Araştırma + senaryo tek adımda (komut satırı için)."""
+    findings = research_topic(prompt, out_dir, lang, cb)
+    return write_plan(prompt, findings, out_dir, lang, cb, length)
 
 
 def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=False, lang="tr", cb=None,

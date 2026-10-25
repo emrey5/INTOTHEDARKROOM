@@ -90,6 +90,11 @@ COUNTRIES = {
 }
 
 PEERS = ["TUR", "DEU", "FRA", "GBR", "ITA", "ESP", "POL", "GRC"]
+ISO_NAMES = {"TUR": "Türkiye", "DEU": "Almanya", "FRA": "Fransa", "USA": "ABD", "CHN": "Çin", "JPN": "Japonya",
+             "IND": "Hindistan", "RUS": "Rusya", "GBR": "Birleşik Krallık", "ITA": "İtalya", "ESP": "İspanya",
+             "BRA": "Brezilya", "GRC": "Yunanistan", "IRN": "İran", "EGY": "Mısır", "KOR": "Güney Kore",
+             "CAN": "Kanada", "AZE": "Azerbaycan", "SAU": "Suudi Arabistan", "POL": "Polonya", "NLD": "Hollanda",
+             "WLD": "Dünya", "EUU": "Avrupa Birliği"}
 
 
 def detect_indicator(text):
@@ -129,6 +134,172 @@ def worldbank_latest(countries, indicator):
     if len(j) < 2 or not j[1]:
         return []
     return [(d["country"]["value"], int(d["date"]), d["value"]) for d in j[1] if d["value"] is not None]
+
+
+# --- Our World in Data (hazır grafik verileri, anahtarsız) ------------------
+
+# anahtar kelimeler -> (grafik adı, Türkçe etiket, birim)
+OWID = [
+    (("yaşam süresi", "ömür", "life expectancy"), "life-expectancy", "Ortalama yaşam süresi", "yıl"),
+    (("co2", "karbon", "emisyon", "sera gazı", "iklim"), "co-emissions-per-capita", "Kişi başı CO₂ emisyonu", "ton"),
+    (("enerji tüketimi", "enerji kullanımı", "energy use"), "per-capita-energy-use", "Kişi başı enerji tüketimi", "kWh"),
+    (("yenilenebilir", "renewable", "güneş enerjisi", "rüzgar enerjisi"), "share-electricity-renewables",
+     "Elektrikte yenilenebilir payı", "%"),
+    (("elektrik üretimi", "electricity generation"), "electricity-generation", "Elektrik üretimi", "TWh"),
+    (("insani gelişme", "hdi", "human development"), "human-development-index", "İnsani Gelişme Endeksi", ""),
+    (("çocuk ölüm", "bebek ölüm", "child mortality"), "child-mortality", "Çocuk ölüm oranı", "%"),
+    (("doğurganlık", "doğum oranı", "fertility", "çocuk sayısı"), "children-per-woman-un", "Kadın başına çocuk", ""),
+    (("internet",), "share-of-individuals-using-the-internet", "İnternet kullanan nüfus", "%"),
+    (("obezite", "şişmanlık", "obesity"), "share-of-adults-defined-as-obese", "Obez yetişkin oranı", "%"),
+    (("cinayet", "homicide", "suç"), "homicide-rate-unodc", "Cinayet oranı (100 bin kişide)", ""),
+    (("mutluluk", "happiness", "mutlu"), "happiness-cantril-ladder", "Mutluluk puanı (0-10)", ""),
+    (("medyan yaş", "yaşlanma", "nüfus yaşı", "median age"), "median-age", "Medyan yaş", "yıl"),
+    (("kentleşme", "şehirleşme", "kentsel nüfus", "urban"), "share-of-population-urban", "Kentsel nüfus payı", "%"),
+    (("askeri harcama", "savunma harcama", "military"), "military-expenditure-share-gdp",
+     "Askeri harcama (GSYH'ye oranı)", "%"),
+    (("okuryazar", "literacy"), "literacy-rate-adults", "Yetişkin okuryazarlık oranı", "%"),
+    (("et tüketimi", "meat"), "meat-supply-per-person", "Kişi başı et tüketimi", "kg"),
+    (("alkol", "alcohol"), "total-alcohol-consumption-per-capita-litres-of-pure-alcohol",
+     "Kişi başı alkol tüketimi", "litre"),
+    (("aşırı yoksul", "yoksulluk", "poverty"), "share-of-population-in-extreme-poverty", "Aşırı yoksulluk oranı", "%"),
+    (("orman", "forest"), "forest-area-as-share-of-land-area", "Orman alanı (karaya oranı)", "%"),
+    (("sigara", "tütün", "smok"), "share-of-adults-who-smoke", "Sigara içen yetişkin oranı", "%"),
+    (("çalışma saati", "working hours"), "annual-working-hours-per-worker", "Yıllık çalışma saati", "saat"),
+    (("trafik kaza", "road deaths"), "death-rates-road-incidents", "Trafik kazası ölüm oranı (100 bin kişide)", ""),
+    (("intihar", "suicide"), "suicide-death-rates", "İntihar oranı (100 bin kişide)", ""),
+]
+OWID_CODES = {"WLD": "OWID_WRL"}
+
+
+def detect_owid(text):
+    low = text.lower()
+    return [(slug, label, unit) for keys, slug, label, unit in OWID if any(k in low for k in keys)]
+
+
+def owid_table(slug):
+    """Grafiğin tüm verisi: {iso3: (ülke adı, [(yıl, değer)])}."""
+    import csv
+    import io
+    r = _get(f"https://ourworldindata.org/grapher/{slug}.csv",
+             params={"v": 1, "csvType": "full", "useColumnShortNames": "false"}, timeout=40)
+    rows = csv.reader(io.StringIO(r.text))
+    next(rows, None)  # Entity, Code, Year, <değer>
+    out = {}
+    for row in rows:
+        if len(row) < 4 or not row[1] or not row[3]:
+            continue
+        try:
+            v = float(row[3])
+        except ValueError:
+            continue
+        out.setdefault(row[1], (row[0], []))[1].append((int(row[2]), v))
+    for _, pts in out.values():
+        pts.sort()
+    return out
+
+
+# --- IMF DataMapper (makroekonomi + tahminler, anahtarsız) ------------------
+
+IMF = {
+    "büyüme": ("NGDP_RPCH", "Reel GSYH büyümesi", "%"),
+    "growth": ("NGDP_RPCH", "Real GDP growth", "%"),
+    "enflasyon": ("PCPIPCH", "Enflasyon (TÜFE)", "%"),
+    "inflation": ("PCPIPCH", "Inflation", "%"),
+    "işsizlik": ("LUR", "İşsizlik oranı", "%"),
+    "borç": ("GGXWDG_NGDP", "Kamu borcu (GSYH'ye oranı)", "%"),
+    "debt": ("GGXWDG_NGDP", "Government debt (% of GDP)", "%"),
+    "cari": ("BCA_NGDPD", "Cari denge (GSYH'ye oranı)", "%"),
+    "ekonomi": ("NGDP_RPCH", "Reel GSYH büyümesi", "%"),
+}
+
+
+def detect_imf(text):
+    low = text.lower()
+    seen, out = set(), []
+    for k, v in IMF.items():
+        if k in low and v[0] not in seen:
+            seen.add(v[0])
+            out.append(v)
+    return out
+
+
+def imf_series(code, countries):
+    """{iso3: [(yıl, değer)]}; IMF gelecek yıllar için tahmin de verir."""
+    r = _get(f"https://www.imf.org/external/datamapper/api/v1/{code}/{'/'.join(countries)}", timeout=30)
+    vals = r.json().get("values", {}).get(code, {})
+    return {c: sorted((int(y), float(v)) for y, v in d.items() if v is not None) for c, d in vals.items()}
+
+
+# --- Wikidata (kesin bilgiler: tarih, nüfus, alan, kişi bilgileri) ----------
+
+WD_PROPS = {
+    "P1082": ("Nüfus", ""), "P2046": ("Yüzölçümü", "km²"), "P36": ("Başkent", ""), "P571": ("Kuruluş", ""),
+    "P35": ("Devlet başkanı", ""), "P6": ("Hükümet başkanı", ""), "P2131": ("GSYH (nominal)", "$"),
+    "P2132": ("Kişi başı GSYH", "$"), "P38": ("Para birimi", ""), "P37": ("Resmî dil", ""),
+    "P2044": ("Rakım", "m"), "P2048": ("Yükseklik", "m"), "P2043": ("Uzunluk", "km"),
+    "P569": ("Doğum tarihi", ""), "P570": ("Ölüm tarihi", ""), "P19": ("Doğum yeri", ""),
+    "P27": ("Vatandaşlık", ""), "P106": ("Meslek", ""), "P112": ("Kurucu", ""), "P159": ("Merkez", ""),
+    "P1128": ("Çalışan sayısı", ""), "P2139": ("Gelir", "$"), "P17": ("Ülke", ""), "P131": ("Bulunduğu yer", ""),
+    "P580": ("Başlangıç", ""), "P582": ("Bitiş", ""), "P585": ("Tarih", ""), "P1120": ("Ölü sayısı", ""),
+    "P2250": ("Yaşam beklentisi", "yıl"), "P1198": ("İşsizlik oranı", "%"), "P1279": ("Enflasyon", "%"),
+}
+WD_API = "https://www.wikidata.org/w/api.php"
+
+
+def _wd_value(snak):
+    dv = (snak or {}).get("datavalue") or {}
+    v, t = dv.get("value"), dv.get("type")
+    if t == "quantity":
+        return float(v["amount"]), None
+    if t == "time":
+        return v["time"].lstrip("+")[:10].replace("-00", ""), None
+    if t == "wikibase-entityid":
+        return None, v.get("id")
+    if t == "monolingualtext":
+        return v.get("text"), None
+    if t == "string":
+        return v, None
+    return None, None
+
+
+def wikidata_facts(query, lang="tr"):
+    """(etiket, açıklama, url, [(özellik adı, değer, birim, tarih)]) ya da None."""
+    r = _get(WD_API, params={"action": "wbsearchentities", "search": query, "language": lang,
+                             "uselang": lang, "format": "json", "limit": 1})
+    hits = r.json().get("search", [])
+    if not hits:
+        return None
+    qid = hits[0]["id"]
+    ent = _get(WD_API, params={"action": "wbgetentities", "ids": qid, "props": "claims|labels|descriptions",
+                               "languages": f"{lang}|en", "format": "json"}).json()["entities"][qid]
+    facts, refs = [], []
+    for pid, (name, unit) in WD_PROPS.items():
+        claims = ent.get("claims", {}).get(pid, [])
+        if not claims:
+            continue
+        best = [c for c in claims if c.get("rank") == "preferred"] or claims
+        c = best[-1]
+        val, ref = _wd_value(c.get("mainsnak"))
+        when = None
+        for q in (c.get("qualifiers") or {}).get("P585", []):
+            when, _ = _wd_value(q)
+        if val is None and ref is None:
+            continue
+        facts.append([name, val, unit, when, ref])
+        if ref:
+            refs.append(ref)
+    if refs:  # varlık değerlerinin (başkent, para birimi…) adlarını al
+        lab = _get(WD_API, params={"action": "wbgetentities", "ids": "|".join(dict.fromkeys(refs))[:2000],
+                                   "props": "labels", "languages": f"{lang}|en", "format": "json"}).json()
+        names = {k: (e.get("labels", {}).get(lang) or e.get("labels", {}).get("en") or {}).get("value")
+                 for k, e in lab.get("entities", {}).items()}
+        for f in facts:
+            if f[4]:
+                f[1] = names.get(f[4])
+    labels, descs = ent.get("labels", {}), ent.get("descriptions", {})
+    label = (labels.get(lang) or labels.get("en") or {}).get("value", query)
+    desc = (descs.get(lang) or descs.get("en") or {}).get("value", "")
+    return label, desc, f"https://www.wikidata.org/wiki/{qid}", [f[:4] for f in facts if f[1] is not None]
 
 
 # --- Medya indirme ----------------------------------------------------------

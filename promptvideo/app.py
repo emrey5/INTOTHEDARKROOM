@@ -134,7 +134,11 @@ QListWidget::item:selected { background: #1A0F05; color: %(orange)s; border-left
 QScrollBar:vertical { background: %(bg)s; width: 10px; margin: 0; }
 QScrollBar::handle:vertical { background: #262626; min-height: 30px; border-radius: 1px; }
 QScrollBar::handle:vertical:hover { background: %(orange3)s; }
-QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
+QScrollBar:horizontal { background: %(bg)s; height: 10px; margin: 0; }
+QScrollBar::handle:horizontal { background: #262626; min-width: 30px; border-radius: 1px; }
+QScrollBar::handle:horizontal:hover { background: %(orange3)s; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 QLabel#formlabel { font-family: 'JetBrains Mono'; color: %(muted)s; font-size: 12px; letter-spacing: 1px; }
 QFrame#banner { background: #140A02; border: 1px solid %(orange3)s; border-left: 4px solid %(orange)s; border-radius: 2px; }
 QLabel#bannertext { font-family: 'JetBrains Mono'; color: %(orange)s; font-weight: 700; letter-spacing: 1px; }
@@ -195,12 +199,14 @@ class Worker(QThread):
     progress = Signal(float)
     preview = Signal(object)
     planned = Signal(object)
+    researched = Signal(object)
     finished_ok = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, mode, prompt=None, plan=None, out_dir="", opts=None):
+    def __init__(self, mode, prompt=None, plan=None, out_dir="", opts=None, findings=None):
         super().__init__()
         self.mode, self.prompt, self.plan, self.out_dir, self.opts = mode, prompt, plan, out_dir, opts or {}
+        self.findings = findings
         self._cancel = threading.Event()
 
     def cancel(self):
@@ -238,8 +244,11 @@ class Worker(QThread):
         old = sys.stdout
         sys.stdout = Stream()
         try:
-            if self.mode == "plan":
-                plan = pipeline.create_plan(self.prompt, self.out_dir, cb=cb, length=self.opts.get("length", "orta"))
+            if self.mode == "research":
+                self.researched.emit(pipeline.research_topic(self.prompt, self.out_dir, cb=cb))
+            elif self.mode == "plan":
+                plan = pipeline.write_plan(self.prompt, self.findings, self.out_dir, cb=cb,
+                                           length=self.opts.get("length", "orta"))
                 self.planned.emit(plan)
             else:
                 o = self.opts
@@ -303,6 +312,7 @@ class MainWindow(QMainWindow):
         self.resize(1440, 900)
         self.settings = QSettings("DARKROOM", "DARKROOM")
         self.plan = None
+        self.findings = None
         self.plan_dir = None
         self.worker = None
         self.last_video = None
@@ -415,10 +425,14 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(22, 10, 22, 22)
         v.setSpacing(8)
         outer.addLayout(v)
-        self.btn_plan = QPushButton("01 ▸ SENARYOYU HAZIRLA", objectName="primary")
+        self.btn_research = QPushButton("01 ▸ ARAŞTIR", objectName="primary")
+        self.btn_research.clicked.connect(self.start_research)
+        v.addWidget(self.btn_research)
+        self.btn_plan = QPushButton("02 ▸ SENARYOYU YAZ", objectName="primary")
         self.btn_plan.clicked.connect(self.start_plan)
+        self.btn_plan.setEnabled(False)
         v.addWidget(self.btn_plan)
-        self.btn_render = QPushButton("02 ▸ VİDEOYU OLUŞTUR", objectName="primary")
+        self.btn_render = QPushButton("03 ▸ VİDEOYU OLUŞTUR", objectName="primary")
         self.btn_render.clicked.connect(self.start_render)
         self.btn_render.setEnabled(False)
         v.addWidget(self.btn_render)
@@ -445,6 +459,7 @@ class MainWindow(QMainWindow):
         self.tabs.setDocumentMode(True)
         self.tabs.tabBar().setDrawBase(False)
         self.tabs.addTab(self._build_preview_tab(), "Önizleme")
+        self.tabs.addTab(self._build_research_tab(), "Araştırma")
         self.tabs.addTab(self._build_editor_tab(), "Senaryo")
         self.tabs.addTab(self._build_library_tab(), "Videolarım")
         w = QWidget()
@@ -539,7 +554,7 @@ class MainWindow(QMainWindow):
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setMinimumSize(640, 360)
         self.preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.preview.setText("> Bir konu yazıp  [ SENARYOYU HAZIRLA ]  düğmesine basın_")
+        self.preview.setText("> Bir konu yazıp  [ ARAŞTIR ]  düğmesine basın_")
         v.addWidget(self.preview, 1)
 
         steps = QHBoxLayout()
@@ -576,6 +591,88 @@ class MainWindow(QMainWindow):
         self.btn_log.toggled.connect(self.log.setVisible)
         v.addWidget(self.log)
         return w
+
+    def _build_research_tab(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(0, 16, 0, 0)
+        v.setSpacing(10)
+        self.research_info = QLabel("Araştırma sonuçları burada görünecek. Senaryo yalnızca işaretli bilgilerden "
+                                    "yazılır ve senaryodaki sayılar bunlarla doğrulanır.", objectName="status")
+        self.research_info.setWordWrap(True)
+        v.addWidget(self.research_info)
+        h = QHBoxLayout()
+        self.finding_list = QListWidget()
+        self.finding_list.setMinimumWidth(420)
+        self.finding_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.finding_list.setWordWrap(True)
+        self.finding_list.currentRowChanged.connect(self.show_finding)
+        self.finding_list.itemChanged.connect(lambda _: self.update_research_info())
+        h.addWidget(self.finding_list, 1)
+        self.finding_text = QPlainTextEdit(objectName="log")
+        self.finding_text.setReadOnly(True)
+        h.addWidget(self.finding_text, 1)
+        v.addLayout(h, 1)
+        hb = QHBoxLayout()
+        for label, state in (("Tümünü seç", True), ("Hiçbirini seçme", False)):
+            b = QPushButton(label)
+            b.clicked.connect(lambda _=False, st=state: self.check_all_findings(st))
+            hb.addWidget(b)
+        self.btn_source = QPushButton("Kaynağı aç")
+        self.btn_source.clicked.connect(self.open_finding_source)
+        hb.addWidget(self.btn_source)
+        hb.addStretch(1)
+        self.btn_write = QPushButton("02 ▸ SEÇİLENLERLE SENARYOYU YAZ", objectName="primary")
+        self.btn_write.clicked.connect(self.start_plan)
+        self.btn_write.setEnabled(False)
+        hb.addWidget(self.btn_write)
+        v.addLayout(hb)
+        return w
+
+    def populate_findings(self):
+        self.finding_list.blockSignals(True)
+        self.finding_list.clear()
+        for f in self.findings or []:
+            it = QListWidgetItem(f"[{f['label']}]  {f['title'][:70]}\n{f['source']}")
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked if f.get("selected", True) else Qt.Unchecked)
+            self.finding_list.addItem(it)
+        self.finding_list.blockSignals(False)
+        if self.finding_list.count():
+            self.finding_list.setCurrentRow(0)
+        else:
+            self.finding_text.setPlainText("Hiç bilgi bulunamadı. İnternet bağlantısını kontrol edin ya da konuyu "
+                                           "farklı yazın. Yine de senaryo yazılabilir (konu başlığıyla sınırlı kalır).")
+        self.update_research_info()
+
+    def sync_findings(self):
+        for i, f in enumerate(self.findings or []):
+            f["selected"] = self.finding_list.item(i).checkState() == Qt.Checked
+        if self.findings is not None and self.plan_dir:
+            os.makedirs(self.plan_dir, exist_ok=True)
+            pipeline.save_findings(self.findings, self.plan_dir)
+
+    def update_research_info(self):
+        n = self.finding_list.count()
+        if not n:
+            return
+        k = sum(1 for i in range(n) if self.finding_list.item(i).checkState() == Qt.Checked)
+        kinds = sorted({f["label"] for f in self.findings or []})
+        self.research_info.setText(f"{n} bilgiden {k} tanesi seçili  ·  kaynaklar: {', '.join(kinds)}")
+
+    def show_finding(self, row):
+        if self.findings and 0 <= row < len(self.findings):
+            f = self.findings[row]
+            self.finding_text.setPlainText(f"{f['title']}\n{f['source']}  ·  {f.get('url') or ''}\n\n{f['text']}")
+
+    def check_all_findings(self, state):
+        for i in range(self.finding_list.count()):
+            self.finding_list.item(i).setCheckState(Qt.Checked if state else Qt.Unchecked)
+
+    def open_finding_source(self):
+        row = self.finding_list.currentRow()
+        if self.findings and 0 <= row < len(self.findings) and self.findings[row].get("url"):
+            QDesktopServices.openUrl(QUrl(self.findings[row]["url"]))
 
     def _build_editor_tab(self):
         w = QWidget()
@@ -630,6 +727,9 @@ class MainWindow(QMainWindow):
         form.addRow(QLabel("ANLATIM", objectName="formlabel"), self.f_narr)
         form.addRow(QLabel("SÜRE", objectName="formlabel"), self.f_dur)
         form.addRow(QLabel("VERİLER", objectName="formlabel"), self.f_data)
+        self.f_check = QLabel("")
+        self.f_check.setWordWrap(True)
+        form.addRow(QLabel("DOĞRULAMA", objectName="formlabel"), self.f_check)
         right.addLayout(form, 1)
         hb = QHBoxLayout()
         self.edit_msg = QLabel("", objectName="status")
@@ -720,7 +820,9 @@ class MainWindow(QMainWindow):
                 "ollama.com</a>, sonra komut satırında <b>ollama pull qwen3:8b</b>")
 
     def set_busy(self, busy):
-        self.btn_plan.setEnabled(not busy)
+        self.btn_research.setEnabled(not busy)
+        self.btn_plan.setEnabled(not busy and self.findings is not None)
+        self.btn_write.setEnabled(not busy and self.findings is not None)
         self.btn_render.setEnabled(not busy and self.plan is not None)
         self.btn_cancel.setVisible(busy)
 
@@ -750,18 +852,43 @@ class MainWindow(QMainWindow):
         s.setValue("subs", self.subs.value())
 
     # ---- iş akışı ----
-    def start_plan(self):
+    def start_research(self):
         prompt = self.prompt.toPlainText().strip()
         if not prompt:
             QMessageBox.information(self, APP_NAME, "Önce videonun konusunu yazın.")
             return
         self.save_settings()
-        planner.MODEL = self.model.currentText().strip() or planner.MODEL
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
         self.plan_dir = os.path.join(self.outdir.text(), f"{stamp}-{slugify(prompt)}")
+        self.research_prompt = prompt
         self.log.clear()
         self.tabs.setCurrentIndex(0)
-        self.worker = Worker("plan", prompt=prompt, out_dir=self.plan_dir, opts={"length": self.length.value()})
+        self.worker = Worker("research", prompt=prompt, out_dir=self.plan_dir)
+        self._wire(self.worker)
+        self.worker.researched.connect(self.on_researched)
+        self.set_busy(True)
+        self.worker.start()
+
+    def on_researched(self, findings):
+        self.findings = findings
+        self.set_busy(False)
+        self.populate_findings()
+        self.bar.setValue(1000)
+        self.status.setText(f"Araştırma bitti: {len(findings)} bilgi bulundu. İstemediklerinizin işaretini "
+                            f"kaldırıp “Senaryoyu yaz”a basın.")
+        self.tabs.setCurrentIndex(1)
+
+    def start_plan(self):
+        if self.findings is None:
+            return
+        self.save_settings()
+        self.sync_findings()
+        planner.MODEL = self.model.currentText().strip() or planner.MODEL
+        prompt = getattr(self, "research_prompt", None) or self.prompt.toPlainText().strip()
+        self.log.clear()
+        self.tabs.setCurrentIndex(0)
+        self.worker = Worker("plan", prompt=prompt, out_dir=self.plan_dir, findings=self.findings,
+                             opts={"length": self.length.value()})
         self._wire(self.worker)
         self.worker.planned.connect(self.on_planned)
         self.set_busy(True)
@@ -798,9 +925,12 @@ class MainWindow(QMainWindow):
         self.plan = plan
         self.set_busy(False)
         self.populate_scenes()
-        self.status.setText(f"Senaryo hazır: {len(plan.get('scenes', []))} sahne. Gözden geçirip “Videoyu oluştur”a basın.")
+        chk = plan.get("check")
+        extra = (f"  ·  {chk['missing']} sayı kaynakta bulunamadı (⚠ işaretli sahneler)" if chk and chk["missing"]
+                 else ("  ·  tüm sayılar kaynaklarda doğrulandı ✓" if chk else ""))
+        self.status.setText(f"Senaryo hazır: {len(plan.get('scenes', []))} sahne{extra}")
         self.bar.setValue(1000)
-        self.tabs.setCurrentIndex(1)
+        self.tabs.setCurrentIndex(2)
 
     def on_rendered(self, path):
         self.set_busy(False)
@@ -829,7 +959,9 @@ class MainWindow(QMainWindow):
         for i, sc in enumerate(self.plan.get("scenes", [])):
             t = sc.get("type", "?")
             name = sc.get("title") or sc.get("caption") or sc.get("label") or ""
-            it = QListWidgetItem(f"{SCENE_ICONS.get(t, '•')}  {i + 1}. {SCENE_TYPES.get(t, t)}\n     {name[:34]}")
+            chk = sc.get("check") or {}
+            mark = "  ⚠" if chk.get("missing") else ("  ✓" if chk.get("verified") else "")
+            it = QListWidgetItem(f"{SCENE_ICONS.get(t, '•')}  {i + 1}. {SCENE_TYPES.get(t, t)}{mark}\n     {name[:34]}")
             self.scene_list.addItem(it)
         self.scene_list.blockSignals(False)
         if self.scene_list.count():
@@ -849,10 +981,23 @@ class MainWindow(QMainWindow):
         self.f_title.setText(sc.get("title") or sc.get("caption") or "")
         self.f_narr.setPlainText(sc.get("narration", ""))
         self.f_dur.setValue(float(sc.get("duration") or 0))
-        rest = {k: v for k, v in sc.items() if k not in COMMON_KEYS and k != "caption" and not k.startswith("_")}
+        rest = {k: v for k, v in sc.items() if k not in COMMON_KEYS and k not in ("caption", "check") and not k.startswith("_")}
         self.f_data.setPlainText(json.dumps(rest, ensure_ascii=False, indent=2))
         self.edit_msg.setText("")
+        self.show_check(sc)
         self.scene_preview.setPixmap(pil_to_pixmap(render_still(sc, self.style, size=(533, 300))))
+
+    def show_check(self, sc):
+        c = sc.get("check")
+        if not c:
+            self.f_check.setText("<span style='color:#8C8277'>Bu sahnede kontrol edilecek sayı yok.</span>"
+                                 if self.findings else "<span style='color:#8C8277'>Araştırma verisi yok.</span>")
+        elif c["missing"]:
+            self.f_check.setText(f"<span style='color:#FF4D1A'>⚠ Kaynaklarda bulunamadı: {', '.join(c['missing'])}</span>"
+                                 f"<br><span style='color:#8C8277'>{c['verified']} sayı doğrulandı. Bulunamayanları "
+                                 f"düzeltin ya da silin.</span>")
+        else:
+            self.f_check.setText(f"<span style='color:#FF7A1A'>✓ {c['verified']} sayının hepsi kaynaklarda var.</span>")
 
     def _scene_from_form(self):
         rest = json.loads(self.f_data.toPlainText() or "{}")
@@ -881,7 +1026,13 @@ class MainWindow(QMainWindow):
         if preview_only:
             self.edit_msg.setText("Önizleme güncellendi (henüz kaydedilmedi).")
             return
+        if self.findings:
+            from .factcheck import check_scene, source_numbers
+            c = check_scene(sc, source_numbers(self.findings))
+            if c["verified"] or c["missing"]:
+                sc["check"] = c
         self.plan["scenes"][row] = sc
+        self.show_check(sc)
         self.write_plan()
         self.populate_scenes(row)
         self.edit_msg.setText("<span style='color:#FF7A1A'>Kaydedildi.</span>")
@@ -890,7 +1041,11 @@ class MainWindow(QMainWindow):
         row = self.scene_list.currentRow()
         if self.plan and row >= 0:
             try:
-                self.plan["scenes"][row] = self._scene_from_form()
+                old = self.plan["scenes"][row]
+                sc = self._scene_from_form()
+                if old.get("check") and sc == {k: v for k, v in old.items() if k != "check"}:
+                    sc["check"] = old["check"]
+                self.plan["scenes"][row] = sc
             except Exception:
                 pass
 
@@ -956,9 +1111,12 @@ class MainWindow(QMainWindow):
             self.plan = json.load(f)
         self.plan_dir = full
         self.prompt.setPlainText(self.plan.get("prompt", self.plan.get("title", "")))
+        self.findings = pipeline.load_findings(full)
+        self.populate_findings()
         self.populate_scenes()
         self.btn_render.setEnabled(True)
-        self.tabs.setCurrentIndex(1)
+        self.btn_plan.setEnabled(bool(self.findings))
+        self.tabs.setCurrentIndex(2)
 
     def closeEvent(self, e):
         self.save_settings()
