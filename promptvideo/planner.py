@@ -269,6 +269,10 @@ def make_plan(prompt, lang="tr", log=print, length="orta", findings=None):
     if findings is None:
         findings = R.gather(prompt, lang, log)
     ok, names = ollama_available()
+    if not names:  # kurulu ama kapalıysa başlat
+        from . import ollama_setup
+        if ollama_setup.find_exe() and ollama_setup.start_server():
+            ok, names = ollama_available()
     if ok:
         log(f"Yerel yapay zekâ ({MODEL}) senaryoyu yazıyor…")
         try:
@@ -279,7 +283,8 @@ def make_plan(prompt, lang="tr", log=print, length="orta", findings=None):
             log(f"  Ollama planlaması başarısız ({e}); kural tabanlı planlayıcıya geçiliyor")
     else:
         log(f"Ollama'da {MODEL} bulunamadı (kurulu modeller: {names or 'yok'}). "
-            f"Kural tabanlı planlayıcı kullanılıyor. Daha iyi senaryo için: ollama pull {MODEL}")
+            "Kural tabanlı planlayıcı kullanılıyor. Daha iyi senaryo için soldaki "
+            "“Ollama'yı kur ve hazırla” düğmesine basın.")
     return trim_plan(plan_fallback(prompt, findings, lang, log), length)
 
 

@@ -70,9 +70,10 @@ titreyen çizgiler, doodle'lar, el yazısı notlar) ve `--style modern` (koyu, p
    - Windows: `winget install Python.Python.3.12` ve `winget install Gyan.FFmpeg`
    - macOS: `brew install python ffmpeg`
 2. Bu klasörde: `pip install -r requirements.txt` (ffmpeg kurulu değilse uygulamayla gelen kopya kullanılır)
-3. **Senaryo beyni (önerilir):** https://ollama.com adresinden Ollama'yı kurun, sonra
-   `ollama pull qwen3:8b`  (8 GB RAM yeterli; güçlü bilgisayarda `qwen3:14b` daha iyi yazar:
-   `PV_MODEL=qwen3:14b`)
+3. **Senaryo beyni (önerilir):** uygulamada üstteki **⚡ KUR VE HAZIRLA** düğmesine basın. Ücretsiz Ollama
+   indirilip kurulur (Windows), başlatılır ve senaryo modeli indirilir: 12 GB ve üstü bellekte `qwen3:8b`
+   (≈5 GB), daha azında `qwen3:4b` (≈2,5 GB). Ollama kurulu ama kapalıysa uygulama onu kendisi başlatır.
+   Elle kurmak isterseniz: https://ollama.com, sonra `ollama pull qwen3:8b`.
 4. İsteğe bağlı: daha çok stok video için https://www.pexels.com/api adresinden ücretsiz
    anahtar alıp `PEXELS_API_KEY` ortam değişkenine yazın.
 

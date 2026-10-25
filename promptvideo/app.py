@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from . import theme, pipeline, planner, scenes, updater, userdata, __version__
 from .waitscreen import WaitScreen
+from . import ollama_setup
 from . import draw as D
 from .render import render_frame
 
@@ -341,7 +342,29 @@ class OllamaCheck(QThread):
 
     def run(self):
         ok, names = planner.ollama_available()
+        if not names and ollama_setup.find_exe():  # kurulu ama kapalı: arka planda başlat
+            if ollama_setup.start_server():
+                ok, names = planner.ollama_available()
         self.result.emit(ok, names)
+
+
+class OllamaSetup(QThread):
+    """Tek tıkla: Ollama'yı indirip kurar (Windows), başlatır ve modeli indirir."""
+    progress = Signal(object, str)
+    done = Signal(bool, str)
+
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self._cancel = threading.Event()
+
+    def run(self):
+        try:
+            ok, why = ollama_setup.ensure(self.model, lambda f, msg: self.progress.emit(f, msg),
+                                          lambda m: self.progress.emit(None, m), self._cancel.is_set)
+            self.done.emit(ok, why)
+        except Exception as e:
+            self.done.emit(False, str(e))
 
 
 # --- Ana pencere -------------------------------------------------------------
@@ -472,6 +495,17 @@ class MainWindow(QMainWindow):
         h.addWidget(self.model, 1)
         h.addWidget(rb)
         v.addLayout(h)
+        self.btn_ai_setup = QPushButton("⚡ OLLAMA'YI KUR VE HAZIRLA")
+        self.btn_ai_setup.setToolTip("Ücretsiz Ollama'yı indirir, kurar, başlatır ve senaryo modelini indirir.")
+        self.btn_ai_setup.clicked.connect(self.setup_ollama)
+        self.btn_ai_setup.hide()
+        v.addWidget(self.btn_ai_setup)
+        self.ai_bar = QProgressBar()
+        self.ai_bar.setRange(0, 1000)
+        self.ai_bar.setTextVisible(False)
+        self.ai_bar.setFixedHeight(6)
+        self.ai_bar.hide()
+        v.addWidget(self.ai_bar)
 
         v.addStretch(1)
         # eylem düğmeleri kaydırma alanının dışında, hep görünür
@@ -520,8 +554,34 @@ class MainWindow(QMainWindow):
         l = QVBoxLayout(w)
         l.setContentsMargins(24, 12, 24, 20)
         l.addWidget(self._build_update_banner())
+        l.addWidget(self._build_ai_banner())
         l.addWidget(self.tabs)
         return w
+
+    def _build_ai_banner(self):
+        """Senaryo yapay zekâsı hazır değilse üstte görünür; tek tıkla kurulum ve ilerleme burada."""
+        self.ai_banner = QFrame(objectName="banner")
+        h = QHBoxLayout(self.ai_banner)
+        h.setContentsMargins(14, 8, 8, 8)
+        col = QVBoxLayout()
+        self.ai_banner_text = QLabel("", objectName="bannertext")
+        self.ai_banner_text.setWordWrap(True)
+        col.addWidget(self.ai_banner_text)
+        self.ai_banner_bar = QProgressBar()
+        self.ai_banner_bar.setRange(0, 1000)
+        self.ai_banner_bar.setTextVisible(False)
+        self.ai_banner_bar.setFixedHeight(5)
+        self.ai_banner_bar.hide()
+        col.addWidget(self.ai_banner_bar)
+        h.addLayout(col, 1)
+        self.btn_ai_banner = QPushButton("⚡ KUR VE HAZIRLA", objectName="primary")
+        self.btn_ai_banner.clicked.connect(self.setup_ollama)
+        later = QPushButton("SONRA")
+        later.clicked.connect(self.ai_banner.hide)
+        h.addWidget(self.btn_ai_banner)
+        h.addWidget(later)
+        self.ai_banner.hide()
+        return self.ai_banner
 
     # ---- güncelleme ----
     def _build_update_banner(self):
@@ -937,14 +997,83 @@ class MainWindow(QMainWindow):
         self.model.clear()
         self.model.addItems(names or [cur])
         self.model.setCurrentText(cur if (cur in names or not names) else names[0])
-        if names:
-            self.ai_status.setText("<span style='color:#FF7A1A'>■ Ollama çalışıyor.</span> Model seçin "
-                                   "(önerilen: qwen3:8b ya da daha büyüğü).")
+        if getattr(self, "_ai_setup", None) and self._ai_setup.isRunning():
+            return
+        rec = ollama_setup.recommended_model()
+        if names and ok:
+            self.ai_status.setText("<span style='color:#FF7A1A'>■ Ollama çalışıyor.</span> Senaryoları yapay "
+                                   "zekâ yazacak.")
+            self.btn_ai_setup.hide()
+            self.ai_banner.hide()
+        elif names:
+            self.ai_status.setText(f"<span style='color:#FF9A3D'>■ Ollama çalışıyor ama {planner.MODEL} modeli "
+                                   f"yok.</span> Aşağıdaki düğme modeli indirir.")
+            self.btn_ai_setup.setText("⚡ MODELİ İNDİR")
+            self.btn_ai_setup.show()
+            self.ai_banner_text.setText(f"SENARYO MODELİ ({planner.MODEL}) EKSİK  ·  TEK TIKLA İNDİRİLİR")
+            self.btn_ai_banner.setText("⚡ MODELİ İNDİR")
+            self.ai_banner.show()
         else:
             self.ai_status.setText(
-                "<span style='color:#FF4D1A'>■ Ollama bulunamadı.</span> Program yine çalışır ama senaryo "
-                "basit kalır. Ücretsiz kurulum: <a style='color:#FF9A3D' href='https://ollama.com/download'>"
-                "ollama.com</a>, sonra komut satırında <b>ollama pull qwen3:8b</b>")
+                "<span style='color:#FF4D1A'>■ Ollama kurulu değil.</span> Program yine çalışır ama senaryo "
+                "basit kalır. Aşağıdaki düğme ücretsiz Ollama'yı ve senaryo modelini kendisi kurar.")
+            self.btn_ai_setup.setText("⚡ OLLAMA'YI KUR VE HAZIRLA")
+            self.btn_ai_setup.show()
+            self.ai_banner_text.setText("SENARYO YAPAY ZEKÂSI (OLLAMA) KURULU DEĞİL  ·  ÜCRETSİZ, TEK TIKLA KURULUR")
+            self.btn_ai_banner.setText("⚡ KUR VE HAZIRLA")
+            self.ai_banner.show()
+            if self.model.currentText() in ("", "qwen3:8b") and rec != "qwen3:8b":
+                self.model.setCurrentText(rec)  # az bellekli bilgisayarda daha küçük model
+
+    def setup_ollama(self):
+        model = self.model.currentText().strip() or ollama_setup.recommended_model()
+        size = "≈5 GB" if "8b" in model else ("≈2,5 GB" if "4b" in model else "birkaç GB")
+        need_install = not ollama_setup.server_up() and not ollama_setup.find_exe()
+        if need_install and sys.platform != "win32":
+            QDesktopServices.openUrl(QUrl(ollama_setup.DOWNLOAD_PAGE))
+            self.ai_status.setText("Ollama indirme sayfası açıldı. Kurduktan sonra ↻ düğmesine basın.")
+            return
+        msg = (("Ücretsiz Ollama programı (≈1 GB) indirilip kurulacak, ardından " if need_install else "")
+               + f"senaryo modeli {model} ({size}) indirilecek.\n\nİnternet hızına göre birkaç dakika ile yarım "
+               "saat arası sürebilir. Bu sırada programı kullanmaya devam edebilirsiniz. Başlatılsın mı?")
+        if QMessageBox.question(self, APP_NAME, msg) != QMessageBox.Yes:
+            return
+        planner.MODEL = model
+        self.btn_ai_setup.setEnabled(False)
+        self.btn_ai_banner.setEnabled(False)
+        self.ai_bar.setValue(0)
+        self.ai_bar.show()
+        self.ai_banner_bar.setValue(0)
+        self.ai_banner_bar.show()
+        self.ai_banner.show()
+        self._ai_setup = OllamaSetup(model)
+        self._ai_setup.progress.connect(self.on_ai_progress)
+        self._ai_setup.done.connect(self.on_ai_setup_done)
+        self._ai_setup.start()
+
+    def on_ai_progress(self, frac, msg):
+        self.ai_status.setText(f"<span style='color:#FF9A3D'>■</span> {msg}")
+        self.ai_banner_text.setText(msg.upper())
+        for bar in (self.ai_bar, self.ai_banner_bar):
+            if frac is None:
+                bar.setRange(0, 0)  # süresi belirsiz adım
+            else:
+                bar.setRange(0, 1000)
+                bar.setValue(int(frac * 1000))
+
+    def on_ai_setup_done(self, ok, why):
+        self.ai_bar.hide()
+        self.ai_banner_bar.hide()
+        self.btn_ai_setup.setEnabled(True)
+        self.btn_ai_banner.setEnabled(True)
+        if ok:
+            self.settings.setValue("model", planner.MODEL)
+            self.check_ollama()
+        elif why == "page":
+            QDesktopServices.openUrl(QUrl(ollama_setup.DOWNLOAD_PAGE))
+        else:
+            self.ai_status.setText(f"<span style='color:#FF4D1A'>■ Hazırlanamadı:</span> {why}")
+            self.ai_banner_text.setText(f"HAZIRLANAMADI: {why}")
 
     def set_busy(self, busy):
         if busy:
