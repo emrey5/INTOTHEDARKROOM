@@ -61,16 +61,15 @@ def _lamp(t):
 
 
 def _sound_path():
-    """Temiz, ince mekanik ses: saat mekanizması gibi tıklar, yumuşak hava süpürmesi (kapı),
-    hafif elektrik tınısı (lamba), her harfte ince bir tık ve sonda derin ama pürüzsüz bir kilit sesi.
-    Bozulma (distorsiyon) ve kare/testere dalga yok; her şey sinüs ve süzülmüş gürültüden."""
-    path = os.path.join(tempfile.gettempdir(), "darkroom_acilis_v7.wav")
+    """Matrix tarzı dijital ses: yağan kod gibi hızlı dijital bip yağmuru, kapıda veri takılmaları (glitch),
+    harflerde şifre çözme cıvıltıları, altta derin dijital nabız ve sonda temiz, derin bir "veri kilidi"."""
+    path = os.path.join(tempfile.gettempdir(), "darkroom_acilis_v8.wav")
     if os.path.exists(path):
         return path
     import numpy as np
     from . import audio as A
     sr = A.SR
-    rng = np.random.default_rng(21)
+    rng = np.random.default_rng(1999)
     total = DURATION + 0.4
     out = np.zeros(int(total * sr))
 
@@ -80,59 +79,70 @@ def _sound_path():
     def put(sec, clip, gain=1.0):
         i = int(sec * sr)
         j = min(len(out), i + len(clip))
-        out[i:j] += clip[: j - i] * gain
+        if i < len(out):
+            out[i:j] += clip[: j - i] * gain
 
-    def lp(x, k):
-        return np.convolve(x, np.ones(k) / k, mode="same")
+    def crush(x, bits=6, hold=3):
+        """Hafif dijital doku: örnekleri tutarak ve basamaklayarak 'bilgisayar' tınısı verir."""
+        x = np.repeat(x[::hold], hold)[: len(x)]
+        q = 2 ** (bits - 1)
+        return np.round(x * q) / q
 
-    def soft(t, attack):
-        return np.minimum(1, t / attack)
-
-    def tick(f=3800, body=0.3):
-        """İnce mekanik tık: saat dişlisi gibi kısa, temiz bir tını ve küçük bir gövde."""
-        t = tt(0.06)
-        x = np.sin(2 * np.pi * f * t) * np.exp(-t / 0.0018)
-        x += 0.4 * np.sin(2 * np.pi * f * 1.61 * t) * np.exp(-t / 0.0012)
-        x += body * np.sin(2 * np.pi * 420 * t) * np.exp(-t / 0.006)
-        return x * soft(t, 0.0003)
-
-    def whoosh(d=0.55):
-        """Yumuşak hava süpürmesi: gürültü giderek açılan bir süzgeçten geçer."""
-        n = int(d * sr)
-        noise = rng.standard_normal(n)
-        x = 0.6 * lp(noise, 40) + 0.4 * lp(noise, 14) * np.linspace(0.3, 1, n)
-        return x * np.sin(np.linspace(0, np.pi, n)) ** 2
-
-    def lock(d=1.4):
-        """Derin, pürüzsüz kilit: inen alçak sinüs + yumuşak metal tınısı + temiz tık."""
+    def blip(f, d=0.018):
         t = tt(d)
-        sub = np.sin(2 * np.pi * np.cumsum(95 * np.exp(-t * 5) + 48) / sr) * np.exp(-t / 0.35)
-        ring = sum(a * np.sin(2 * np.pi * f * t) * np.exp(-t / dc)
-                   for f, a, dc in ((220, 0.35, 0.5), (330.5, 0.2, 0.4), (587, 0.12, 0.25), (1046, 0.06, 0.15)))
-        return (sub * 0.9 + ring) * soft(t, 0.004)
+        return np.sin(2 * np.pi * f * t) * np.exp(-t / (d / 3)) * np.minimum(1, t / 0.0008)
 
-    # kapı sürgüleri
-    for k, sec in enumerate(T_BOLTS):
-        put(sec, tick(3200 + k * 260, 0.5), 0.35)
-    # kapı açılırken hava süpürmesi
-    put(T_DOOR[0] - 0.05, whoosh(T_DOOR[1] + 0.2), 0.12)
-    # lamba: hafif elektrik tınısı ve çok kısık, temiz bir 100 Hz mırıltı
-    put(T_LAMP, tick(2600, 0.2), 0.25)
-    t = tt(total - T_LAMP)
-    hum = (np.sin(2 * np.pi * 100 * t) + 0.3 * np.sin(2 * np.pi * 200 * t)) * soft(t, 0.3)
-    put(T_LAMP, hum * np.clip((total - T_LAMP - t) / 0.6, 0, 1), 0.02)
-    # harfler: her biri ince bir tık, hafifçe yükselen perdeyle
+    def chirp(f0, f1, d=0.05):
+        """Şifre çözme cıvıltısı: hızla perdesi değişen kısa dijital sinyal."""
+        t = tt(d)
+        f = f0 * (f1 / f0) ** (t / d)
+        x = np.sin(2 * np.pi * np.cumsum(f) / sr) * np.exp(-t / (d / 2.5)) * np.minimum(1, t / 0.001)
+        return crush(x, 7, 2)
+
+    # 1) dijital yağmur: rastgele bip'ler, kapı açılınca yoğunlaşır, kilitte durulur
+    scale = [1046.5, 1174.7, 1396.9, 1568.0, 1760.0, 2093.0, 2349.3, 2793.8, 3136.0]
+    k = 0.05
+    while k < T_LOCK + 0.5:
+        dens = 18 + 70 * _p(k, T_DOOR[0], 0.6) * (1 - 0.7 * _p(k, T_LOCK - 0.2, 0.5))
+        g = 0.10 + 0.08 * rng.random()
+        put(k, crush(blip(scale[rng.integers(len(scale))] * rng.choice([0.5, 1, 1, 2]), 0.012 + 0.015 * rng.random()), 6, 2), g)
+        k += rng.exponential(1 / dens)
+    # 2) derin dijital nabız: temiz alçak sinüs, yavaşça kabarır (bozulma yok)
+    t = tt(total)
+    pulse = np.sin(2 * np.pi * 55 * t) * (0.6 + 0.4 * np.sin(2 * np.pi * 2.0 * t) ** 2)
+    pulse += 0.35 * np.sin(2 * np.pi * 82.4 * t)
+    pulse *= np.clip(t / T_LOCK, 0, 1) ** 1.5 * np.clip((total - t) / 0.8, 0, 1)
+    put(0, pulse, 0.18)
+    # 3) kapı sürgüleri: kısa dijital tıklar
+    for sec in T_BOLTS:
+        put(sec, chirp(4000, 1500, 0.025), 0.35)
+    # 4) kapı açılırken veri takılması (glitch): aynı küçük dilimin hızla tekrarı
+    sl = chirp(2600, 600, 0.03)
+    for r in range(7):
+        put(T_DOOR[0] + r * 0.028, sl * (1 - r / 9), 0.3)
+    n = int((T_DOOR[1] + 0.1) * sr)  # süzülmüş dijital rüzgâr
+    wind = np.convolve(rng.standard_normal(n), np.ones(24) / 24, mode="same")
+    put(T_DOOR[0], crush(wind * np.sin(np.linspace(0, np.pi, n)) ** 2 * 3, 5, 4), 0.08)
+    # 5) lamba: yükselen tarama sinyali
+    put(T_LAMP, chirp(300, 2400, 0.18), 0.22)
+    # 6) harfler: her biri şifre çözme cıvıltısı (yüksekten alçağa), perde harften harfe iner
     for i in range(len(WORD)):
-        put(T_LETTER + i * LETTER_GAP + LETTER_FLY, tick(3000 + i * 120, 0.35), 0.22)
-    # son kilit
-    put(T_LOCK, lock(), 0.55)
-    put(T_LOCK, tick(2400, 0.8), 0.3)
-    # pencere geçişiyle birlikte sönme
+        put(T_LETTER + i * LETTER_GAP + LETTER_FLY - 0.02, chirp(3600 - i * 160, 900 - i * 40, 0.045), 0.3)
+    # 7) veri kilidi: kısa ters süpürme + derin temiz darbe + aşağı inen dijital ışıltı
+    n = int(0.35 * sr)
+    rev = np.convolve(rng.standard_normal(n), np.ones(10) / 10, mode="same") * np.linspace(0, 1, n) ** 3
+    put(T_LOCK - 0.35, rev, 0.25)
+    t = tt(1.4)
+    boom = np.sin(2 * np.pi * np.cumsum(110 * np.exp(-t * 7) + 41) / sr) * np.exp(-t / 0.45) * np.minimum(1, t / 0.003)
+    put(T_LOCK, boom, 0.75)
+    for j, f in enumerate((3136.0, 2349.3, 1760.0, 1396.9, 1046.5, 783.99)):
+        put(T_LOCK + 0.04 + j * 0.045, blip(f, 0.08), 0.18)
+    # pencere geçişiyle sönme
     fo, end = int(0.6 * sr), int((DURATION + 0.3) * sr)
     out[end - fo:end] *= np.linspace(1, 0, fo)
     out[end:] = 0
     peak = np.max(np.abs(out)) or 1
-    A._write(path, out / peak * 0.7)  # doğrusal normalleştirme, bozulma yok
+    A._write(path, out / peak * 0.7)
     return path
 
 
@@ -352,7 +362,7 @@ class Splash(QWidget):
         lk = _ease(_p(t, T_LOCK, 0.3))
         if lk > 0:
             p.fillRect(QRectF(w / 2 - total / 2 * lk, y0 + 18, total * lk, 4), ORANGE)
-        sub = "// PROMPT → VIDEO · veri destekli animasyon motoru"
+        sub = "credit by EC"
         sa = _ease(_p(t, T_LOCK + 0.05, 0.35))
         if sa > 0:
             p.setFont(QFont("JetBrains Mono", 11))
