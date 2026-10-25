@@ -143,22 +143,34 @@ def render_scene(sc, out_path, t_offset, total_t, sidx, nscenes, audio=None, on_
         raise RuntimeError(f"ffmpeg sahne {sidx} için başarısız oldu")
 
 
-def concat(parts, out_path, music=None):
+def concat(parts, out_path, music=None, sfx=None):
     lst = out_path + ".txt"
     with open(lst, "w", encoding="utf-8") as f:
         for p in parts:
             f.write(f"file '{os.path.abspath(p)}'\n")
-    if music and os.path.exists(music):
+    music = music if music and os.path.exists(music) else None
+    sfx = sfx if sfx and os.path.exists(sfx) else None
+    if music or sfx:
         tmp = out_path + ".nomusic.mp4"
         subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst,
                         "-c", "copy", tmp], check=True, **_NOWIN)
-        # müzik düşük seviyede çalar, konuşma varken otomatik kısılır (sidechain ducking)
-        fc = ("[1:a]volume=0.35,aloop=loop=-1:size=2e9[m];"
-              "[m][0:a]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[md];"
-              "[0:a][md]amix=inputs=2:duration=first:normalize=0[a]")
-        subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-i", tmp, "-i", music,
-                        "-filter_complex", fc, "-map", "0:v", "-map", "[a]", "-c:v", "copy",
-                        *AUD, "-movflags", "+faststart", out_path], check=True, **_NOWIN)
+        ins, fc, mix = ["-i", tmp], ["[0:a]asplit=2[v][vk]"], ["[v]"]
+        if music:
+            # müzik düşük seviyede çalar, konuşma varken otomatik kısılır (sidechain ducking)
+            ins += ["-i", music]
+            fc += [f"[{len(ins) // 2 - 1}:a]volume=0.35,aloop=loop=-1:size=2e9[m]",
+                   "[m][vk]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[md]"]
+            mix.append("[md]")
+        else:
+            fc[0] = "[0:a]anull[v]"
+        if sfx:
+            ins += ["-i", sfx]
+            fc.append(f"[{len(ins) // 2 - 1}:a]volume=0.55[sx]")
+            mix.append("[sx]")
+        fc.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:normalize=0[a]")
+        subprocess.run([FFMPEG, "-y", "-loglevel", "error", *ins, "-filter_complex", ";".join(fc),
+                        "-map", "0:v", "-map", "[a]", "-c:v", "copy", *AUD, "-movflags", "+faststart", out_path],
+                       check=True, **_NOWIN)
         os.remove(tmp)
     else:
         subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst,

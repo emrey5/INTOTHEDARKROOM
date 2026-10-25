@@ -36,6 +36,8 @@ SCENE_ICONS = {"title": "✦", "bullets": "☰", "stat": "#", "bar": "▤", "lin
                "people": "☷", "outro": "★"}
 VOICES = [("Ahmet (erkek)", "tr-TR-AhmetNeural"), ("Emel (kadın)", "tr-TR-EmelNeural"),
           ("Sessiz", "")]
+MUSIC_MODES = [("Yok", ""), ("Otomatik · Sakin", "auto:sakin"), ("Otomatik · Enerjik", "auto:enerjik"),
+               ("Otomatik · Gizemli", "auto:gizemli"), ("Kendi dosyam…", "file")]
 EXAMPLES = [
     "Türkiye'nin nüfusu 1960'tan bugüne nasıl değişti?",
     "Avrupa'da enflasyon: Türkiye, Almanya, Fransa karşılaştırması",
@@ -262,7 +264,7 @@ class Worker(QThread):
                 o = self.opts
                 out = pipeline.render_plan(self.plan, self.out_dir, o.get("style"), o.get("voice") or None,
                                            o.get("music") or None, not o.get("voice"), cb=cb,
-                                           subtitles=o.get("subtitles", False))
+                                           subtitles=o.get("subtitles", False), sfx=o.get("sfx", True))
                 self.finished_ok.emit(out)
         except pipeline.Cancelled:
             self.failed.emit("İptal edildi.")
@@ -391,15 +393,25 @@ class MainWindow(QMainWindow):
         self.voice.setCurrentIndex(int(self.settings.value("voice_idx", 0)))
         v.addWidget(self.voice)
 
-        v.addWidget(self._section("Arka plan müziği (isteğe bağlı)"))
+        v.addWidget(self._section("Arka plan müziği"))
         h = QHBoxLayout()
+        self.music_mode = QComboBox()
+        for name, val in MUSIC_MODES:
+            self.music_mode.addItem(name, val)
+        self.music_mode.setCurrentIndex(max(0, self.music_mode.findData(self.settings.value("music_mode", "auto:sakin"))))
         self.music = QLineEdit(self.settings.value("music", ""))
-        self.music.setPlaceholderText("Telifsiz bir mp3 seçin")
-        mb = QPushButton("Seç")
-        mb.clicked.connect(self.pick_music)
-        h.addWidget(self.music, 1)
-        h.addWidget(mb)
+        self.music.setPlaceholderText("mp3 / wav dosyası")
+        self.music_btn = QPushButton("Seç")
+        self.music_btn.clicked.connect(self.pick_music)
+        self.music_mode.currentIndexChanged.connect(self.on_music_mode)
+        h.addWidget(self.music_mode, 1)
+        h.addWidget(self.music_btn)
         v.addLayout(h)
+        v.addWidget(self.music)
+        self.on_music_mode()
+
+        v.addWidget(self._section("Ses efektleri"))
+        self.sfx = self._segmented([("1", "AÇIK"), ("0", "KAPALI")], self.settings.value("sfx", "1"), v)
 
         v.addWidget(self._section("Kayıt klasörü"))
         h = QHBoxLayout()
@@ -793,6 +805,15 @@ class MainWindow(QMainWindow):
         v.addLayout(g)
         return grp
 
+    def on_music_mode(self, *_):
+        own = self.music_mode.currentData() == "file"
+        self.music.setVisible(own)
+        self.music_btn.setVisible(own)
+
+    def music_choice(self):
+        m = self.music_mode.currentData()
+        return self.music.text().strip() if m == "file" else m
+
     def pick_music(self):
         p, _ = QFileDialog.getOpenFileName(self, "Müzik seç", "", "Ses (*.mp3 *.wav *.m4a *.ogg)")
         if p:
@@ -854,6 +875,8 @@ class MainWindow(QMainWindow):
         s.setValue("prompt", self.prompt.toPlainText())
         s.setValue("voice_idx", self.voice.currentIndex())
         s.setValue("music", self.music.text())
+        s.setValue("music_mode", self.music_mode.currentData())
+        s.setValue("sfx", self.sfx.value())
         s.setValue("outdir", self.outdir.text())
         s.setValue("model", self.model.currentText())
         s.setValue("length", self.length.value())
@@ -908,7 +931,8 @@ class MainWindow(QMainWindow):
         self.commit_scene_silently()
         self.save_settings()
         self.write_plan()
-        opts = {"style": self.style, "voice": self.voice.currentData(), "music": self.music.text().strip(),
+        opts = {"style": self.style, "voice": self.voice.currentData(), "music": self.music_choice(),
+                "sfx": self.sfx.value() == "1",
                 "subtitles": self.subs.value() == "1"}
         self.tabs.setCurrentIndex(0)
         self.worker = Worker("render", plan=self.plan, out_dir=self.plan_dir, opts=opts)

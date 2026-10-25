@@ -9,6 +9,7 @@ import time
 
 from . import webdata as W
 from . import scenes, tts
+from . import audio as A
 from .render import render_scene, concat
 
 MIN_DUR = {"title": 5, "bullets": 7, "stat": 5, "bar": 7, "line": 8, "pie": 7, "table": 7,
@@ -153,8 +154,9 @@ def create_plan(prompt, out_dir, lang="tr", cb=None, length="orta"):
 
 
 def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=False, lang="tr", cb=None,
-                preview_every=10, subtitles=False):
-    """Planı videoya çevirir; video yolunu döner."""
+                preview_every=10, subtitles=False, sfx=True):
+    """Planı videoya çevirir; video yolunu döner.
+    music: ses dosyası yolu ya da "auto:enerjik" / "auto:sakin" / "auto:gizemli" (program üretir)."""
     global _cb
     _cb = cb or Callbacks()
     from . import theme
@@ -193,7 +195,7 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
 
     _cb.stage(4, 5, "Animasyonlar çiziliyor")
     total = sum(sc["duration"] for sc in sc_list)
-    parts, off, srt = [], 0.0, []
+    parts, off, srt, events, cuts = [], 0.0, [], [], []
 
     def on_frame(gt, surf):
         if _cb.cancelled():
@@ -212,11 +214,20 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
         if sc.get("narration"):
             srt.append(f"{len(srt) + 1}\n{srt_time(off + 0.3)} --> {srt_time(off + sc['duration'] - 0.5)}\n{sc['narration']}\n")
         parts.append(p)
+        events += [(off + s, n, g) for s, n, g in A.scene_events(sc, sc["duration"])]
         off += sc["duration"]
+        cuts.append(off)
 
     _cb.stage(5, 5, "Montaj")
     out = os.path.join(out_dir, "video.mp4")
-    concat(parts, out, music)
+    sfx_path = None
+    if sfx:
+        sfx_path = A.build_sfx(events, total, os.path.join(assets, "efektler.wav"), cuts[:-1])
+    if music and music.startswith("auto:"):
+        mood = music.split(":", 1)[1]
+        log(f"Müzik üretiliyor ({A.MOODS.get(mood, mood)})…")
+        music = A.build_music(mood, total, os.path.join(assets, "muzik.wav"))
+    concat(parts, out, music, sfx_path)
     with open(os.path.join(out_dir, "altyazi.srt"), "w", encoding="utf-8") as f:
         f.write("\n".join(srt))
     for p in parts:
