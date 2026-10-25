@@ -74,9 +74,9 @@ def source_numbers(findings):
         se = f.get("series")
         if se:
             vals.update(v for _, v in se["points"])
-        la = f.get("latest")
-        if la:
-            vals.update(r[2] for r in la["rows"])
+        for key in ("latest", "world"):
+            if f.get(key):
+                vals.update(r[2] for r in f[key]["rows"])
         for fact in f.get("facts") or []:
             if isinstance(fact[1], float):
                 vals.add(fact[1])
@@ -114,7 +114,7 @@ def scene_claims(sc):
     t = sc.get("type")
     if t == "stat" and isinstance(sc.get("value"), (int, float)):
         out.append((None, float(sc["value"])))
-    if t in ("bar", "pie"):
+    if t in ("bar", "pie", "map"):
         out += [(None, float(d["value"])) for d in sc.get("data", []) if isinstance(d.get("value"), (int, float))]
     if t == "line":
         for se in sc.get("series", []):

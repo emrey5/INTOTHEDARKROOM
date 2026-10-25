@@ -784,8 +784,169 @@ def draw_people(ctx, sc, t, dur):
     D.footer_source(ctx, sc.get("source"), t)
 
 
+# --- Harita ------------------------------------------------------------------
+
+_MAPS = {}
+_TR_MAP = str.maketrans("İIıÇçĞğÖöŞşÜüÂâÎî", "iiiccggoossuuaaii")
+
+
+def _key(s):
+    return str(s).translate(_TR_MAP).lower().strip()
+
+
+def _load_map(kind):
+    if kind not in _MAPS:
+        import json
+        import os
+        fn = "turkiye_iller.json" if kind == "turkey" else "dunya.json"
+        with open(os.path.join(os.path.dirname(__file__), "assets", "maps", fn), encoding="utf-8") as f:
+            m = json.load(f)
+        for ft in m["features"]:
+            big = max(ft["polys"], key=len)
+            ft["c"] = (sum(p[0] for p in big) / len(big), sum(p[1] for p in big) / len(big))
+            ft["keys"] = {_key(k) for k in (ft.get("iso"), ft.get("name"), ft.get("en"), ft.get("id")) if k}
+        _MAPS[kind] = m
+    return _MAPS[kind]
+
+
+def _match(m, label):
+    k = _key(label)
+    alias = {"abd": "usa", "amerika": "usa", "ingiltere": "gbr", "birlesik krallik": "gbr", "rusya": "rus",
+             "guney kore": "kor", "kuzey kore": "prk", "cek cumhuriyeti": "cze", "iran": "irn"}
+    k = alias.get(k, k)
+    for ft in m["features"]:
+        if k in ft["keys"]:
+            return ft
+    return None
+
+
+def _unit_fmt(v, unit):
+    n = fmt_num(v, LANG, None if abs(v) >= 1e6 else (0 if float(v).is_integer() or abs(v) >= 100 else 1))
+    if unit == "%":
+        return "%" + n
+    if unit == "$":
+        return "$" + n
+    return f"{n} {unit}".strip()
+
+
+def draw_map(ctx, sc, t, dur):
+    """Dünya ya da Türkiye (il) haritası; bölgeler değere göre turuncunun tonlarıyla boyanır."""
+    kind = "turkey" if _key(sc.get("map", "world")) in ("turkey", "turkiye", "tr", "iller") else "world"
+    m = _load_map(kind)
+    D.header(ctx, sc.get("title", ""), sc.get("kicker"), t)
+    vals = {}
+    for d in sc.get("data", []):
+        ft = _match(m, d.get("label", ""))
+        if ft is not None:
+            vals[id(ft)] = (_num(d.get("value")), d.get("label"))
+    x0, y0, x1, y1 = m["bbox"]
+    ax, ay, aw, ah = 140, 250, W - 280, H - 330
+    s0 = min(aw / (x1 - x0), ah / (y1 - y0))
+    # kamera: veriler küçük bir bölgedeyse oraya yakınlaş
+    cam = (x0, y0, x1, y1)
+    if vals and kind == "world":
+        pts = [ft["c"] for ft in m["features"] if id(ft) in vals]
+        bx0, by0 = min(p[0] for p in pts), min(p[1] for p in pts)
+        bx1, by1 = max(p[0] for p in pts), max(p[1] for p in pts)
+        pad = max(bx1 - bx0, (by1 - by0) * aw / ah, 0.6) * 0.35
+        tgt = (bx0 - pad, by0 - pad, bx1 + pad, by1 + pad)
+        if (tgt[2] - tgt[0]) < (x1 - x0) * 0.7:
+            z = ease_in_out(prog(t, 0.6, 1.4))
+            cam = tuple(lerp(a, b, z) for a, b in zip(cam, tgt))
+    cs = min(aw / (cam[2] - cam[0]), ah / (cam[3] - cam[1]))
+    ox = ax + (aw - (cam[2] - cam[0]) * cs) / 2 - cam[0] * cs
+    oy = ay + (ah - (cam[3] - cam[1]) * cs) / 2 - cam[1] * cs
+    lo = min((v for v, _ in vals.values()), default=0)
+    hi = max((v for v, _ in vals.values()), default=1)
+    base = mix(th.BG2, th.GRID, 0.7)
+    dark, bright = mix(th.BG2, th.ACCENT, 0.35), th.ACCENT
+    ctx.push_group()  # harita kenarlarda yumuşakça kaybolur
+    for ft in m["features"]:
+        cx_ = (ft["c"][0] - x0) / (x1 - x0)
+        a = ease_out_cubic(prog(t, 0.1 + cx_ * 0.5, 0.5))
+        if a <= 0:
+            continue
+        col = base
+        if id(ft) in vals:
+            v = vals[id(ft)][0]
+            f = (v - lo) / (hi - lo) if hi > lo else 1.0
+            q = ease_out_cubic(prog(t, 1.0 + cx_ * 0.6, 0.6))
+            col = mix(base, mix(dark, bright, f), q)
+        ctx.new_path()
+        for poly in ft["polys"]:
+            ctx.move_to(ox + poly[0][0] * cs, oy + poly[0][1] * cs)
+            for px, py in poly[1:]:
+                ctx.line_to(ox + px * cs, oy + py * cs)
+            ctx.close_path()
+        ctx.set_source_rgba(*col, a)
+        ctx.fill_preserve()
+        ctx.set_source_rgba(*th.BG, 0.9 * a)
+        ctx.set_line_width(1.2 if kind == "world" else 1.6)
+        ctx.stroke()
+    ctx.pop_group_to_source()
+    fade = cairo.LinearGradient(0, ay - 30, 0, ay + ah + 50)
+    for st, a_ in ((0, 0), (0.08, 1), (0.9, 1), (1, 0)):
+        fade.add_color_stop_rgba(st, 0, 0, 0, a_)
+    ctx.mask(fade)
+    # en yüksek değerli bölgelere etiket iğneleri (üst üste binmesinler)
+    top = sorted(((v, lab, ft) for ft in m["features"] if id(ft) in vals for v, lab in [vals[id(ft)]]),
+                 key=lambda r: -r[0])[: int(sc.get("labels", 6))]
+    unit = sc.get("unit", "")
+    placed = []
+    for i, (v, lab, ft) in enumerate(top):
+        px, py = ox + ft["c"][0] * cs, oy + ft["c"][1] * cs
+        txt = f"{lab}  {_unit_fmt(v, unit)}"
+        tw = D.text_width(txt, 26, "bold") + 28
+        stem = 40
+        for k in range(8):
+            box = (px - tw / 2 - 6, py - stem - 50, px + tw / 2 + 6, py - stem + 2)
+            if not any(box[0] < b[2] and b[0] < box[2] and box[1] < b[3] and b[1] < box[3] for b in placed):
+                break
+            stem = 40 + 56 * (k + 1) * (1 if k % 2 == 0 else -1) if py - 40 - 56 * (k + 1) > ay else stem + 56
+        placed.append(box)
+        q = ease_out_back(prog(t, 1.8 + i * 0.25, 0.4), 2.2)
+        if q <= 0:
+            continue
+        ctx.save()
+        ctx.translate(px, py)
+        ctx.scale(q, q)
+        ctx.set_source_rgb(*th.TEXT)
+        ctx.arc(0, 0, 7, 0, math.tau)
+        ctx.fill()
+        ctx.move_to(0, 0)
+        ctx.line_to(0, -stem)
+        ctx.set_line_width(3)
+        ctx.stroke()
+        ctx.set_source_rgba(0.03, 0.03, 0.03, 0.92)
+        D.round_rect(ctx, -tw / 2, -stem - 44, tw, 46, 8)
+        ctx.fill()
+        ctx.set_source_rgb(*th.ACCENT)
+        ctx.rectangle(-tw / 2, -stem - 44, 5, 46)
+        ctx.fill()
+        D.draw_text(ctx, txt, 0, -stem - 12, 26, th.TEXT, kind="bold", align="center")
+        ctx.restore()
+    # gösterge
+    if vals:
+        q = clamp((t - 1.2) * 2)
+        lx, ly = W - 140 - 360, H - 70
+        g = cairo.LinearGradient(lx, 0, lx + 360, 0)
+        g.add_color_stop_rgba(0, *dark, q)
+        g.add_color_stop_rgba(1, *bright, q)
+        ctx.set_source(g)
+        D.round_rect(ctx, lx, ly - 14, 360, 14, 7)
+        ctx.fill()
+        D.draw_text(ctx, _unit_fmt(lo, unit), lx, ly + 22, 22, th.MUTED, alpha=q)
+        D.draw_text(ctx, _unit_fmt(hi, unit), lx + 360, ly + 22, 22, th.MUTED, alpha=q, align="right")
+    if sc.get("presenter"):
+        C.draw_character(ctx, 150, H - 20, t, 0.5, look=sc.get("look", 0), pose="point", prev_pose="idle",
+                         pose_t=prog(t, 0.6, 0.5), emotion="happy", talking=t < dur - 0.6, seed=4,
+                         enter=prog(t, 0.2, 0.5))
+    D.footer_source(ctx, sc.get("source"), t)
+
+
 DRAWERS = {
     "title": draw_title, "bullets": draw_bullets, "stat": draw_stat, "bar": draw_bar,
     "line": draw_line, "pie": draw_pie, "table": draw_table, "image": draw_image,
     "outro": draw_outro, "character": draw_character_scene, "versus": draw_versus, "people": draw_people,
+    "map": draw_map,
 }

@@ -29,11 +29,11 @@ SCENE_TYPES = {
     "title": "Başlık", "bullets": "Madde listesi", "stat": "Büyük sayı", "bar": "Çubuk grafik",
     "line": "Çizgi grafik", "pie": "Pasta grafik", "table": "Tablo", "image": "Görsel",
     "video": "Video klip", "character": "Karakter konuşur", "versus": "Karşılaştırma (VS)",
-    "people": "İnsan piktogramı", "outro": "Kapanış",
+    "people": "İnsan piktogramı", "map": "Harita", "outro": "Kapanış",
 }
 SCENE_ICONS = {"title": "✦", "bullets": "☰", "stat": "#", "bar": "▤", "line": "📈", "pie": "◔",
                "table": "▦", "image": "🖼", "video": "🎬", "character": "☺", "versus": "⚔",
-               "people": "☷", "outro": "★"}
+               "people": "☷", "map": "🗺", "outro": "★"}
 VOICES = [("Ahmet (erkek)", "tr-TR-AhmetNeural"), ("Emel (kadın)", "tr-TR-EmelNeural"),
           ("Sessiz", "")]
 MUSIC_MODES = [("Yok", ""), ("Otomatik · Sakin", "auto:sakin"), ("Otomatik · Enerjik", "auto:enerjik"),
@@ -63,6 +63,8 @@ SAMPLE_SCENES = {
                "left": {"label": "A", "value": 10}, "right": {"label": "B", "value": 7}},
     "people": {"type": "people", "kicker": "Oran", "title": "Başlık", "value": 30, "total": 100,
                "label": "Her 100 kişiden 30'u"},
+    "map": {"type": "map", "map": "turkey", "kicker": "Türkiye", "title": "Başlık", "unit": "",
+            "data": [{"label": "İstanbul", "value": 15.7}, {"label": "Ankara", "value": 5.8}], "presenter": True},
     "outro": {"type": "outro", "title": "İzlediğiniz için teşekkürler", "sources": []},
 }
 COMMON_KEYS = ("type", "kicker", "title", "narration", "duration")

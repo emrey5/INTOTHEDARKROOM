@@ -107,6 +107,12 @@ def gather(prompt, lang="tr", log=print):
                 log(f"  [our world in data] {label}: {len(pts)} yıl")
                 c.add("owid", f"{label} · {name}", "Our World in Data", _series_text(name, label, unit, pts), url,
                       series={"name": name, "label": label, "unit": unit, "points": pts})
+            world = sorted(((v[0], *v[1][-1]) for k, v in tab.items() if len(k) == 3 and v[1]), key=lambda r: -r[2])
+            if len(world) > 30:
+                c.add("owid", f"{label} · dünya haritası", "Our World in Data",
+                      _latest_text(label, unit, world[:12]) + " … en düşükler: " +
+                      ", ".join(f"{n} ({y})={_num(v)}" for n, y, v in world[-5:]), url,
+                      world={"label": label, "unit": unit, "rows": world})
             rows = [(tab[k][0], *tab[k][1][-1]) for k in (W.OWID_CODES.get(p, p) for p in peers) if k in tab]
             if len(rows) > 2:
                 c.add("owid", f"{label} · ülke karşılaştırması", "Our World in Data", _latest_text(label, unit, rows),

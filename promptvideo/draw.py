@@ -29,8 +29,15 @@ def font(kind, size):
     return _fonts[key]
 
 
+_FALLBACK = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")  # gömülü fontlarda olmayan karakterler
+
+
+def clean(s):
+    return str(s).translate(_FALLBACK)
+
+
 def text_width(s, size, kind="body"):
-    return font(kind, size).getlength(s)
+    return font(kind, size).getlength(clean(s))
 
 
 def _mask(s, size, kind, stroke=0):
@@ -80,7 +87,7 @@ def _paint_mask(ctx, s, x, y, size, kind, source, alpha, stroke=0):
 def draw_text(ctx, s, x, y, size, color=None, alpha=1.0, kind="body", align="left", source=None,
               outline=None, shadow=None):
     """y taban çizgisidir. Çizgi stilinde outline/shadow ile çıkartma görünümü verilebilir."""
-    s = str(s)
+    s = clean(s)
     if not s or alpha <= 0.002:
         return text_width(s, size, kind) if s else 0
     color = th.TEXT if color is None else color
@@ -102,7 +109,7 @@ def draw_text(ctx, s, x, y, size, color=None, alpha=1.0, kind="body", align="lef
 def anim_text(ctx, s, x, y, size, t, start=0.0, kind="display", color=None, align="left",
               stagger=0.03, dur=0.6, source=None, mode=None, outline=None, shadow=None):
     """Harf harf animasyonlu metin. mode: 'rise' (modern), 'pop' (çizgi), 'type' (daktilo)."""
-    s = str(s)
+    s = clean(s)
     mode = mode or ("pop" if th.SKETCH else "rise")
     w = text_width(s, size, kind)
     if align == "center":

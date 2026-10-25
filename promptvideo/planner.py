@@ -33,6 +33,7 @@ SCHEMA = """
     {"type": "character", "kicker": "...", "characters": [{"look": 0, "pose": "talk", "emotion": "happy"}], "say": [{"who": 0, "text": "karakterin söylediği kısa cümle"}], "narration": "..."},
     {"type": "versus", "kicker": "...", "title": "...", "left": {"label": "...", "value": 1.0}, "right": {"label": "...", "value": 2.0}, "unit": "", "higher_is_better": true, "source": "...", "narration": "..."},
     {"type": "people", "kicker": "...", "title": "...", "value": 30, "total": 100, "label": "Her 100 kişiden 30'u ...", "source": "...", "narration": "..."},
+    {"type": "map", "map": "world ya da turkey", "kicker": "...", "title": "...", "unit": "", "data": [{"label": "ülke ya da il adı", "value": 1.0}], "presenter": true, "source": "...", "narration": "..."},
     {"type": "outro", "title": "...", "sources": ["kaynak adı"], "narration": "..."}
   ]
 }
@@ -55,6 +56,8 @@ Kurallar:
   1-2 kısa cümle; iki karakter soru-cevap yapabilir). look 0-5 farklı karakterlerdir; pose: talk, point,
   present, wave, cheer, shrug, think; emotion: happy, neutral, surprised, sad, angry, worried.
   İki şeyi kıyaslarken "versus", bir oranı (yüzde) anlatırken "people" kullan.
+- Ülkelere ya da Türkiye'nin illerine göre veri varsa "map" sahnesi kullan (map: "world" ya da "turkey";
+  label olarak Türkçe ülke/il adı yaz). "presenter": true ise köşede haritayı gösteren bir karakter durur.
 - Kısa yaz: başlıklar en fazla 60 karakter, maddeler en fazla 80 karakter, tablo en fazla 8 satır.
 - Metinler kullanıcının dilinde (varsayılan Türkçe); image_query ve stock_query İngilizce.
 Yalnızca şu şemaya uyan JSON döndür:
@@ -157,6 +160,14 @@ def plan_fallback(prompt, findings, lang="tr", log=print):
                 scenes.append({"type": "people", "kicker": name, "title": label, "value": round(v1, 1), "total": 100,
                                "label": f"Her 100 kişiden yaklaşık {round(v1)} tanesi.", "source": f["source"],
                                "narration": f"Yani her 100 kişiden yaklaşık {round(v1)} tanesi."})
+        wm = f.get("world")
+        if wm:
+            top = wm["rows"][0]
+            scenes.append({"type": "map", "map": "world", "kicker": "Dünya", "title": wm["label"], "unit": wm["unit"],
+                           "data": [{"label": n, "value": v} for n, _, v in wm["rows"]], "presenter": True,
+                           "source": f["source"],
+                           "narration": f"Dünya haritasında {wm['label'].lower()} en yüksek {top[0]} ülkesinde: "
+                                        f"{_fmt(top[2], wm['unit'])}."})
         la = f.get("latest")
         if la and len(la["rows"]) > 2:
             rows, unit, label = la["rows"], la["unit"], la["label"]
@@ -213,7 +224,7 @@ def trim_plan(plan, length="orta"):
     """Yedek planı seçilen süreye sığdırır: başlık ve kapanış kalır, aradakiler kısalır."""
     sc, mx = plan["scenes"], LENGTHS.get(length, LENGTHS["orta"])[1]
     if len(sc) > mx:
-        prio = {"title": 0, "outro": 0, "character": 1, "line": 1, "stat": 2, "versus": 2, "bar": 3, "people": 3,
+        prio = {"title": 0, "outro": 0, "character": 1, "line": 1, "map": 2, "stat": 2, "versus": 2, "bar": 3, "people": 3,
                 "bullets": 4, "image": 5, "video": 6}
         keep = sorted(sorted(range(len(sc)), key=lambda i: (prio.get(sc[i]["type"], 7), i))[:mx])
         plan["scenes"] = [sc[i] for i in keep]

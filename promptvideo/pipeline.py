@@ -13,7 +13,7 @@ from . import audio as A
 from .render import render_scene, concat
 
 MIN_DUR = {"title": 5, "bullets": 7, "stat": 5, "bar": 7, "line": 8, "pie": 7, "table": 7,
-           "image": 5, "video": 5, "outro": 5, "character": 5, "versus": 7, "people": 7}
+           "image": 5, "video": 5, "outro": 5, "character": 5, "versus": 7, "people": 7, "map": 8}
 
 
 class Callbacks:
