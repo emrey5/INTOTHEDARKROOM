@@ -1,0 +1,1316 @@
+"""DARKROOM: masaüstü uygulaması (PySide6).
+
+Akış: konu yaz -> senaryoyu hazırla (araştırma + plan) -> sahneleri gözden geçir/düzenle ->
+videoyu oluştur (canlı önizleme ile) -> videoyu aç.
+"""
+import datetime
+import json
+import os
+import re
+import sys
+import threading
+
+from PySide6.QtCore import Qt, QThread, Signal, QSettings, QUrl, QSize, QTimer
+from PySide6.QtGui import QImage, QPixmap, QDesktopServices, QIcon, QFont, QFontDatabase
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QLabel,
+    QPlainTextEdit, QPushButton, QComboBox, QLineEdit, QFileDialog, QProgressBar, QTabWidget,
+    QListWidget, QListWidgetItem, QFrame, QMessageBox, QSplitter, QSizePolicy, QCheckBox,
+    QFormLayout, QDoubleSpinBox, QToolButton, QScrollArea, QButtonGroup, QInputDialog, QStackedWidget)
+
+from . import theme, pipeline, planner, scenes, updater, userdata, __version__
+from .waitscreen import WaitScreen
+from . import draw as D
+from .render import render_frame
+
+APP_NAME = "DARKROOM"
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+SCENE_TYPES = {
+    "title": "Başlık", "bullets": "Madde listesi", "stat": "Büyük sayı", "bar": "Çubuk grafik",
+    "line": "Çizgi grafik", "pie": "Pasta grafik", "table": "Tablo", "image": "Görsel",
+    "video": "Video klip", "character": "Karakter konuşur", "versus": "Karşılaştırma (VS)",
+    "people": "İnsan piktogramı", "map": "Harita", "timeline": "Zaman çizelgesi",
+    "compare": "Önce / sonra", "outro": "Kapanış",
+}
+SCENE_ICONS = {"title": "✦", "bullets": "☰", "stat": "#", "bar": "▤", "line": "📈", "pie": "◔",
+               "table": "▦", "image": "🖼", "video": "🎬", "character": "☺", "versus": "⚔",
+               "people": "☷", "map": "🗺", "timeline": "⏱", "compare": "⇄", "outro": "★"}
+VOICES = [("Ahmet (erkek)", "tr-TR-AhmetNeural"), ("Emel (kadın)", "tr-TR-EmelNeural"),
+          ("Sessiz", "")]
+MUSIC_MODES = [("Yok", ""), ("Otomatik · Sakin", "auto:sakin"), ("Otomatik · Enerjik", "auto:enerjik"),
+               ("Otomatik · Gizemli", "auto:gizemli"), ("Kendi dosyam…", "file")]
+EXAMPLES = [
+    "Türkiye'nin nüfusu 1960'tan bugüne nasıl değişti?",
+    "Avrupa'da enflasyon: Türkiye, Almanya, Fransa karşılaştırması",
+    "Kahvenin dünyaya yayılış hikâyesi",
+]
+SAMPLE_SCENES = {
+    "title": {"type": "title", "title": "Örnek Başlık", "subtitle": "Alt başlık burada"},
+    "bullets": {"type": "bullets", "kicker": "Öne çıkanlar", "title": "Başlık", "items": ["Birinci madde", "İkinci madde"]},
+    "stat": {"type": "stat", "kicker": "Etiket", "value": 42, "suffix": "", "label": "açıklama"},
+    "bar": {"type": "bar", "kicker": "Karşılaştırma", "title": "Başlık", "unit": "",
+            "data": [{"label": "A", "value": 10}, {"label": "B", "value": 7}]},
+    "line": {"type": "line", "kicker": "Zaman", "title": "Başlık", "unit": "",
+             "series": [{"name": "Seri", "data": [{"x": "2020", "y": 1}, {"x": "2021", "y": 3}]}]},
+    "pie": {"type": "pie", "kicker": "Dağılım", "title": "Başlık",
+            "data": [{"label": "A", "value": 60}, {"label": "B", "value": 40}]},
+    "table": {"type": "table", "kicker": "Tablo", "title": "Başlık", "columns": ["Ad", "Değer"],
+              "rows": [["A", "1"], ["B", "2"]]},
+    "image": {"type": "image", "kicker": "", "caption": "Açıklama", "image_query": "landscape"},
+    "video": {"type": "video", "kicker": "", "caption": "Açıklama", "stock_query": "city"},
+    "character": {"type": "character", "kicker": "", "backdrop": "studio", "characters": [{"look": 0, "pose": "talk", "emotion": "happy"}],
+                  "say": [{"who": 0, "text": "Merhaba! Bugün ilginç bir konuya bakıyoruz."}]},
+    "versus": {"type": "versus", "kicker": "Karşılaştırma", "title": "Başlık", "unit": "", "backdrop": "studio",
+               "left": {"label": "A", "value": 10}, "right": {"label": "B", "value": 7}},
+    "people": {"type": "people", "kicker": "Oran", "title": "Başlık", "value": 30, "total": 100,
+               "label": "Her 100 kişiden 30'u"},
+    "map": {"type": "map", "map": "turkey", "kicker": "Türkiye", "title": "Başlık", "unit": "",
+            "data": [{"label": "İstanbul", "value": 15.7}, {"label": "Ankara", "value": 5.8}], "presenter": True},
+    "timeline": {"type": "timeline", "kicker": "Zaman çizelgesi", "title": "Başlık",
+                 "events": [{"year": "1923", "text": "Birinci olay"}, {"year": "1950", "text": "İkinci olay"},
+                            {"year": "2000", "text": "Üçüncü olay"}]},
+    "compare": {"type": "compare", "kicker": "Önce / sonra", "title": "Başlık", "unit": "",
+                "before": {"label": "2000", "value": 10, "text": ""}, "after": {"label": "2024", "value": 25, "text": ""}},
+    "outro": {"type": "outro", "title": "İzlediğiniz için teşekkürler", "sources": []},
+}
+COMMON_KEYS = ("type", "kicker", "title", "narration", "duration")
+
+# Arayüz teması: mekanik, derin siyah tonlar + turuncu vurgu
+C = dict(
+    bg="#050505", panel="#0B0B0B", panel2="#111111", field="#070707", line="#1F1F1F", line2="#2B2B2B",
+    text="#E6DED3", muted="#7D746A", dim="#4A443E", orange="#FF7A1A", orange2="#FF9A3D", orange3="#B84E00",
+    warn="#FF4D1A",
+)
+QSS = """
+* { font-family: 'Inter', 'Segoe UI', sans-serif; font-size: 14px; color: %(text)s; }
+QMainWindow { background: %(bg)s; }
+QWidget#root { background-color: %(bg)s; background-image: url(%(tile)s); }
+QFrame#side { background: %(panel)s; border-right: 1px solid %(line)s; }
+QLabel#brand { font-family: 'JetBrains Mono'; font-size: 21px; font-weight: 800; color: %(orange)s; letter-spacing: 2px; }
+QLabel#brandsub { font-family: 'JetBrains Mono'; color: %(muted)s; font-size: 11px; }
+QLabel[class="section"] { font-family: 'JetBrains Mono'; color: %(orange)s; font-size: 11px; font-weight: 700;
+    letter-spacing: 2px; margin-top: 12px; padding-bottom: 2px; border-bottom: 1px solid %(line)s; }
+QPlainTextEdit, QLineEdit, QComboBox, QDoubleSpinBox, QListWidget {
+    background: %(field)s; border: 1px solid %(line2)s; border-top: 1px solid #000000; border-radius: 3px;
+    padding: 8px; selection-background-color: %(orange)s; selection-color: #000000; }
+QPlainTextEdit:focus, QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus { border: 1px solid %(orange)s; }
+QComboBox::drop-down { border: none; width: 26px; }
+QComboBox::down-arrow { image: url(%(arrow_down)s); width: 12px; height: 12px; margin-right: 8px; }
+QDoubleSpinBox::up-arrow { image: url(%(arrow_up)s); width: 10px; height: 10px; }
+QDoubleSpinBox::down-arrow { image: url(%(arrow_down)s); width: 10px; height: 10px; }
+QComboBox QAbstractItemView { background: %(panel2)s; border: 1px solid %(orange3)s; outline: none;
+    selection-background-color: %(orange)s; selection-color: #000000; }
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { background: %(panel2)s; border-left: 1px solid %(line2)s; width: 18px; }
+
+/* mekanik düğmeler: siyah metal gövde, üstte ince ışık, basınca içe göçer */
+QPushButton {
+    font-family: 'JetBrains Mono'; font-weight: 700; font-size: 13px; letter-spacing: 1px; color: %(text)s;
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #232323, stop:0.08 #1A1A1A, stop:0.5 #121212, stop:1 #0A0A0A);
+    border: 1px solid #2E2E2E; border-bottom: 2px solid #000000; border-top: 1px solid #3A3A3A;
+    border-radius: 3px; padding: 9px 14px; }
+QPushButton:hover { color: %(orange2)s; border: 1px solid %(orange3)s; border-bottom: 2px solid #000000; }
+QPushButton:pressed { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #050505, stop:1 #141414);
+    border-top: 2px solid #000000; border-bottom: 1px solid #2E2E2E; padding-top: 10px; padding-bottom: 8px; }
+QPushButton:disabled { color: %(dim)s; background: #0C0C0C; border: 1px solid #191919; }
+QPushButton#primary {
+    color: %(orange)s; font-size: 14px; padding: 13px; letter-spacing: 2px;
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #262626, stop:0.07 #1B1B1B, stop:0.55 #111111, stop:1 #080808);
+    border: 1px solid %(orange3)s; border-left: 4px solid %(orange)s; border-bottom: 2px solid #000000; }
+QPushButton#primary:hover { color: #000000; background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %(orange2)s, stop:1 %(orange)s);
+    border: 1px solid %(orange2)s; border-left: 4px solid #FFFFFF; }
+QPushButton#primary:pressed { color: #000000; background: %(orange3)s; }
+QPushButton#primary:disabled { color: %(dim)s; border: 1px solid #1C1C1C; border-left: 4px solid #2A2A2A; background: #0C0C0C; }
+QPushButton#danger { color: %(warn)s; border: 1px solid #4A1A08; border-left: 4px solid %(warn)s; }
+QPushButton#chip { font-family: 'Inter'; font-weight: 500; font-size: 12px; letter-spacing: 0; text-align: left;
+    padding: 6px 10px; color: %(muted)s; background: %(field)s; border: 1px solid %(line)s; border-radius: 2px; }
+QPushButton#chip:hover { color: %(orange2)s; border-color: %(orange3)s; }
+QToolButton#seg { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 11px; letter-spacing: 1px; color: %(muted)s;
+    background: %(field)s; border: 1px solid %(line2)s; border-radius: 2px; padding: 8px 4px; }
+QToolButton#seg:hover { color: %(orange2)s; border-color: %(orange3)s; }
+QToolButton#seg:checked { color: %(orange)s; border: 1px solid %(orange)s; border-bottom: 3px solid %(orange)s; background: #120A03; }
+
+QTabWidget::pane { border: none; }
+QTabBar::tab { font-family: 'JetBrains Mono'; background: transparent; color: %(muted)s; padding: 12px 20px;
+    font-weight: 700; letter-spacing: 2px; border-bottom: 2px solid %(line)s; }
+QTabBar::tab:hover { color: %(text)s; }
+QTabBar::tab:selected { color: %(orange)s; border-bottom: 2px solid %(orange)s; background: #0E0905; }
+
+/* segmentli ilerleme göstergesi */
+QProgressBar { background: #000000; border: 1px solid %(line2)s; border-radius: 2px; height: 16px; padding: 2px; }
+QProgressBar::chunk { background: %(orange)s; width: 9px; margin: 0 1px; }
+
+QLabel#preview { background: #000000; border: 1px solid %(line)s; border-radius: 2px; }
+QLabel#status { font-family: 'JetBrains Mono'; color: %(muted)s; font-size: 12px; }
+QLabel[class="step"] { font-family: 'JetBrains Mono'; color: %(dim)s; font-weight: 700; font-size: 12px; }
+QLabel[class="stepon"] { font-family: 'JetBrains Mono'; color: %(orange)s; font-weight: 800; font-size: 12px; }
+QLabel[class="stepdone"] { font-family: 'JetBrains Mono'; color: %(text)s; font-weight: 700; font-size: 12px; }
+QPlainTextEdit#log { font-family: 'JetBrains Mono'; font-size: 12px; color: %(orange2)s; background: #000000; }
+QListWidget { outline: none; }
+QListWidget::item { padding: 10px; border-left: 2px solid transparent; margin: 1px 0; }
+QListWidget::item:hover { background: #100B06; }
+QListWidget::item:selected { background: #1A0F05; color: %(orange)s; border-left: 2px solid %(orange)s; }
+QScrollBar:vertical { background: %(bg)s; width: 10px; margin: 0; }
+QScrollBar::handle:vertical { background: #262626; min-height: 30px; border-radius: 1px; }
+QScrollBar::handle:vertical:hover { background: %(orange3)s; }
+QScrollBar:horizontal { background: %(bg)s; height: 10px; margin: 0; }
+QScrollBar::handle:horizontal { background: #262626; min-width: 30px; border-radius: 1px; }
+QScrollBar::handle:horizontal:hover { background: %(orange3)s; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; }
+QLabel#formlabel { font-family: 'JetBrains Mono'; color: %(muted)s; font-size: 12px; letter-spacing: 1px; }
+QFrame#banner { background: #140A02; border: 1px solid %(orange3)s; border-left: 4px solid %(orange)s; border-radius: 2px; }
+QLabel#bannertext { font-family: 'JetBrains Mono'; color: %(orange)s; font-weight: 700; letter-spacing: 1px; }
+QToolTip { background: #000000; color: %(orange2)s; border: 1px solid %(orange3)s; font-family: 'JetBrains Mono'; }
+"""
+
+
+def app_stylesheet():
+    def asset(name):
+        return os.path.join(HERE, "assets", name).replace("\\", "/")
+    return QSS % dict(C, tile=asset("bg_tile.png"), arrow_down=asset("arrow_down.png"),
+                      arrow_up=asset("arrow_up.png"))
+
+
+def pil_to_pixmap(im):
+    im = im.convert("RGB")
+    qi = QImage(im.tobytes("raw", "RGB"), im.width, im.height, 3 * im.width, QImage.Format_RGB888)
+    return QPixmap.fromImage(qi.copy())
+
+
+def render_still(scene, style, t=None, size=(960, 540)):
+    """Tek bir sahnenin bir karesini (varsayılan: animasyonlar bitmişken) çizer."""
+    from PIL import Image
+    theme.apply_style(style)
+    D._paper = None if getattr(render_still, "_style", None) != style else D._paper
+    render_still._style = style
+    sc = dict(scene)
+    sc.setdefault("duration", 8)
+    dur = float(sc["duration"])
+    t = dur * 0.6 if t is None else t
+    surf, ctx = D.new_surface()
+    try:
+        if sc.get("type") == "image" and sc.get("image_path") and not os.path.exists(sc["image_path"]):
+            sc.pop("image_path")
+        render_frame(ctx, sc, t, dur, t, dur, 0, 1, None)
+    except Exception as e:  # yarım düzenlenmiş sahne çizilemezse uygulama çökmesin
+        D.background(ctx, 0)
+        D.draw_text(ctx, f"Önizleme çizilemedi: {e}", 120, 540, 36, theme.ACCENT)
+    surf.flush()
+    im = Image.frombuffer("RGBA", (surf.get_width(), surf.get_height()), bytes(surf.get_data()),
+                          "raw", "BGRA", 0, 1)
+    return im.resize(size, Image.LANCZOS)
+
+
+def slugify(s):
+    s = s.lower()
+    for a, b in zip("çğıöşüâî", "cgiosuai"):
+        s = s.replace(a, b)
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s[:40] or "video"
+
+
+# --- Arka plan işçisi --------------------------------------------------------
+
+class Worker(QThread):
+    log = Signal(str)
+    stage = Signal(int, int, str)
+    progress = Signal(float)
+    preview = Signal(object)
+    planned = Signal(object)
+    researched = Signal(object)
+    finished_ok = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, mode, prompt=None, plan=None, out_dir="", opts=None, findings=None):
+        super().__init__()
+        self.mode, self.prompt, self.plan, self.out_dir, self.opts = mode, prompt, plan, out_dir, opts or {}
+        self.findings = findings
+        self._cancel = threading.Event()
+
+    def on_progress(self, f):
+        self.bar.setValue(int(f * 1000))
+        i, n = getattr(self, "_stage", (1, 1))
+        self.wait.set_progress((i - 1 + f) / n)  # bütün işin ilerlemesi: adamın yamaçtaki yeri
+
+    def cancel(self):
+        self._cancel.set()
+
+    def run(self):
+        w = self
+
+        class CB(pipeline.Callbacks):
+            def log(self, msg):
+                w.log.emit(str(msg))
+
+            def stage(self, i, n, label):
+                w.stage.emit(i, n, label)
+
+            def progress(self, frac):
+                w.progress.emit(float(frac))
+
+            def preview(self, im):
+                w.preview.emit(im.resize((960, 540)))
+
+            def cancelled(self):
+                return w._cancel.is_set()
+
+        cb = CB()
+
+        class Stream:  # webdata/tts içindeki print'leri de günlüğe aktar
+            def write(self, s):
+                if s.strip():
+                    w.log.emit(s.rstrip())
+
+            def flush(self):
+                pass
+
+        old = sys.stdout
+        sys.stdout = Stream()
+        try:
+            if self.mode == "research":
+                self.researched.emit(pipeline.research_topic(self.prompt, self.out_dir, cb=cb))
+            elif self.mode == "plan":
+                plan = pipeline.write_plan(self.prompt, self.findings, self.out_dir, cb=cb,
+                                           length=self.opts.get("length", "orta"))
+                self.planned.emit(plan)
+            else:
+                o = self.opts
+                out = pipeline.render_plan(self.plan, self.out_dir, o.get("style"), o.get("voice") or None,
+                                           o.get("music") or None, not o.get("voice"), cb=cb,
+                                           subtitles=o.get("subtitles", False), sfx=o.get("sfx", True),
+                                           vertical=o.get("vertical", False))
+                self.finished_ok.emit(out)
+        except pipeline.Cancelled:
+            self.failed.emit("İptal edildi.")
+        except Exception as e:
+            import traceback
+            self.log.emit(traceback.format_exc())
+            self.failed.emit(str(e))
+        finally:
+            sys.stdout = old
+
+
+class SourceLoader(QThread):
+    """Kullanıcının dosyasını ya da web adresini arka planda okur."""
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, path=None, url=None):
+        super().__init__()
+        self.path, self.url = path, url
+
+    def run(self):
+        try:
+            self.done.emit(userdata.from_file(self.path) if self.path else userdata.from_url(self.url))
+        except Exception as e:
+            self.failed.emit(str(e) or e.__class__.__name__)
+
+
+class UpdateCheck(QThread):
+    result = Signal(object, str)
+
+    def __init__(self, token=None):
+        super().__init__()
+        self.token = token
+
+    def run(self):
+        try:
+            self.result.emit(updater.check(self.token), "")
+        except Exception as e:
+            self.result.emit(None, str(e))
+
+
+class UpdateDownload(QThread):
+    progress = Signal(float)
+    done = Signal(str, str)
+
+    def __init__(self, info, token=None):
+        super().__init__()
+        self.info, self.token = info, token
+
+    def run(self):
+        try:
+            self.done.emit(updater.download(self.info, self.token, self.progress.emit), "")
+        except Exception as e:
+            self.done.emit("", str(e))
+
+
+class OllamaCheck(QThread):
+    result = Signal(bool, list)
+
+    def run(self):
+        ok, names = planner.ollama_available()
+        self.result.emit(ok, names)
+
+
+# --- Ana pencere -------------------------------------------------------------
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(f"{APP_NAME}  v{__version__}")
+        self.resize(1440, 900)
+        self.settings = QSettings("DARKROOM", "DARKROOM")
+        self.plan = None
+        self.findings = None
+        self.plan_dir = None
+        self.worker = None
+        self.last_video = None
+        self.style = "mekanik"  # uygulamada tek görünüm
+
+        root = QWidget(objectName="root")
+        self.setCentralWidget(root)
+        lay = QHBoxLayout(root)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._build_sidebar())
+        lay.addWidget(self._build_main(), 1)
+
+        self.check_ollama()
+        QTimer.singleShot(1500, self.check_updates)
+        self.refresh_library()
+
+    # ---- kenar çubuğu ----
+    def _section(self, text):
+        l = QLabel(text.upper())
+        l.setProperty("class", "section")
+        return l
+
+    def _build_sidebar(self):
+        side = QFrame(objectName="side")
+        side.setFixedWidth(380)
+        outer = QVBoxLayout(side)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; } QScrollArea > QWidget > QWidget { background: transparent; }")
+        inner = QWidget()
+        v = QVBoxLayout(inner)
+        v.setContentsMargins(22, 22, 22, 22)
+        v.setSpacing(8)
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
+
+        v.addWidget(QLabel("▌DARKROOM", objectName="brand"))
+        v.addWidget(QLabel("credit by EC", objectName="brandsub"))
+
+        v.addWidget(self._section("Konu"))
+        self.prompt = QPlainTextEdit()
+        self.prompt.setPlaceholderText("Videonun konusunu yazın…\nör. Türkiye'de en çok ihracat yapılan ürünler")
+        self.prompt.setFixedHeight(96)
+        self.prompt.setPlainText(self.settings.value("prompt", ""))
+        v.addWidget(self.prompt)
+        for ex in EXAMPLES:
+            b = QPushButton("↳ " + ex, objectName="chip")
+            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            b.setToolTip(ex)
+            b.clicked.connect(lambda _=False, e=ex: self.prompt.setPlainText(e))
+            v.addWidget(b)
+
+        v.addWidget(self._section("Video süresi"))
+        self.length = self._segmented([("kisa", "KISA\n~30 sn"), ("orta", "ORTA\n~1 dk"), ("uzun", "UZUN\n~2 dk")],
+                                      self.settings.value("length", "orta"), v)
+
+        v.addWidget(self._section("Altyazı"))
+        self.subs = self._segmented([("0", "YOK"), ("1", "VİDEOYA YAZ")], self.settings.value("subs", "1"), v)
+
+        v.addWidget(self._section("Seslendirme"))
+        self.voice = QComboBox()
+        for name, val in VOICES:  # noqa
+            self.voice.addItem(name, val)
+        self.voice.setCurrentIndex(int(self.settings.value("voice_idx", 0)))
+        v.addWidget(self.voice)
+
+        v.addWidget(self._section("Arka plan müziği"))
+        h = QHBoxLayout()
+        self.music_mode = QComboBox()
+        for name, val in MUSIC_MODES:
+            self.music_mode.addItem(name, val)
+        self.music_mode.setCurrentIndex(max(0, self.music_mode.findData(self.settings.value("music_mode", "auto:sakin"))))
+        self.music = QLineEdit(self.settings.value("music", ""))
+        self.music.setPlaceholderText("mp3 / wav dosyası")
+        self.music_btn = QPushButton("Seç")
+        self.music_btn.clicked.connect(self.pick_music)
+        self.music_mode.currentIndexChanged.connect(self.on_music_mode)
+        h.addWidget(self.music_mode, 1)
+        h.addWidget(self.music_btn)
+        v.addLayout(h)
+        v.addWidget(self.music)
+        self.on_music_mode()
+
+        v.addWidget(self._section("Dikey sürüm (Shorts / Reels / TikTok)"))
+        self.vert = self._segmented([("0", "YOK"), ("1", "OLUŞTUR")], self.settings.value("vertical", "0"), v)
+
+        v.addWidget(self._section("Ses efektleri"))
+        self.sfx = self._segmented([("1", "AÇIK"), ("0", "KAPALI")], self.settings.value("sfx", "1"), v)
+
+        v.addWidget(self._section("Kayıt klasörü"))
+        h = QHBoxLayout()
+        default_out = os.path.join(os.path.expanduser("~"), "Videos", "DARKROOM")
+        self.outdir = QLineEdit(self.settings.value("outdir", default_out))
+        ob = QPushButton("Seç")
+        ob.clicked.connect(self.pick_outdir)
+        h.addWidget(self.outdir, 1)
+        h.addWidget(ob)
+        v.addLayout(h)
+
+        v.addWidget(self._section("Senaryo yazan yapay zekâ"))
+        self.ai_status = QLabel("Kontrol ediliyor…")
+        self.ai_status.setWordWrap(True)
+        self.ai_status.setOpenExternalLinks(True)
+        v.addWidget(self.ai_status)
+        h = QHBoxLayout()
+        self.model = QComboBox()
+        self.model.setEditable(True)
+        self.model.setCurrentText(self.settings.value("model", planner.MODEL))
+        rb = QPushButton("↻")
+        rb.setFixedWidth(44)
+        rb.clicked.connect(self.check_ollama)
+        h.addWidget(self.model, 1)
+        h.addWidget(rb)
+        v.addLayout(h)
+
+        v.addStretch(1)
+        # eylem düğmeleri kaydırma alanının dışında, hep görünür
+        v = QVBoxLayout()
+        v.setContentsMargins(22, 10, 22, 22)
+        v.setSpacing(8)
+        outer.addLayout(v)
+        self.btn_research = QPushButton("01 ▸ ARAŞTIR", objectName="primary")
+        self.btn_research.clicked.connect(self.start_research)
+        v.addWidget(self.btn_research)
+        self.btn_plan = QPushButton("02 ▸ SENARYOYU YAZ", objectName="primary")
+        self.btn_plan.clicked.connect(self.start_plan)
+        self.btn_plan.setEnabled(False)
+        v.addWidget(self.btn_plan)
+        self.btn_render = QPushButton("03 ▸ VİDEOYU OLUŞTUR", objectName="primary")
+        self.btn_render.clicked.connect(self.start_render)
+        self.btn_render.setEnabled(False)
+        v.addWidget(self.btn_render)
+        self.btn_cancel = QPushButton("■ İPTAL", objectName="danger")
+        self.btn_cancel.clicked.connect(self.cancel)
+        self.btn_cancel.hide()
+        v.addWidget(self.btn_cancel)
+        foot = QHBoxLayout()
+        ver = QLabel(f"v{__version__}", objectName="status")
+        foot.addWidget(ver, 1)
+        chk = QPushButton("GÜNCELLEMELERİ DENETLE", objectName="chip")
+        chk.clicked.connect(lambda: self.check_updates(manual=True))
+        tok = QPushButton("TOKEN", objectName="chip")
+        tok.setToolTip("GitHub token (yalnızca depo gizliyse gerekir)")
+        tok.clicked.connect(self.ask_token)
+        foot.addWidget(chk)
+        foot.addWidget(tok)
+        v.addLayout(foot)
+        return side
+
+    # ---- ana alan ----
+    def _build_main(self):
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.tabs.tabBar().setDrawBase(False)
+        self.tabs.addTab(self._build_preview_tab(), "Önizleme")
+        self.tabs.addTab(self._build_research_tab(), "Araştırma")
+        self.tabs.addTab(self._build_editor_tab(), "Senaryo")
+        self.tabs.addTab(self._build_library_tab(), "Videolarım")
+        w = QWidget()
+        l = QVBoxLayout(w)
+        l.setContentsMargins(24, 12, 24, 20)
+        l.addWidget(self._build_update_banner())
+        l.addWidget(self.tabs)
+        return w
+
+    # ---- güncelleme ----
+    def _build_update_banner(self):
+        self.banner = QFrame(objectName="banner")
+        h = QHBoxLayout(self.banner)
+        h.setContentsMargins(14, 8, 8, 8)
+        self.banner_text = QLabel("", objectName="bannertext")
+        h.addWidget(self.banner_text, 1)
+        self.btn_update = QPushButton("▲ GÜNCELLE", objectName="primary")
+        self.btn_update.clicked.connect(self.do_update)
+        self.btn_notes = QPushButton("NOTLAR")
+        self.btn_notes.clicked.connect(lambda: self.update_info and QDesktopServices.openUrl(QUrl(self.update_info["page"])))
+        later = QPushButton("SONRA")
+        later.clicked.connect(self.banner.hide)
+        for b in (self.btn_update, self.btn_notes, later):
+            h.addWidget(b)
+        self.banner.hide()
+        self.update_info = None
+        return self.banner
+
+    def check_updates(self, manual=False):
+        self._uc = UpdateCheck(self.settings.value("gh_token", "") or None)
+        self._uc.result.connect(lambda info, err: self.on_update_check(info, err, manual))
+        self._uc.start()
+
+    def on_update_check(self, info, err, manual):
+        if err:
+            if manual:
+                QMessageBox.information(self, APP_NAME, f"Güncelleme denetlenemedi:\n{err}")
+            return
+        if not info:
+            if manual:
+                QMessageBox.information(self, APP_NAME, f"En güncel sürümü kullanıyorsunuz (v{__version__}).")
+            return
+        self.update_info = info
+        ready = bool(info["asset_api"])
+        self.banner_text.setText(
+            f"▲ YENİ SÜRÜM  v{info['version']}  ·  şu an v{__version__}"
+            + ("" if ready else "  ·  kurulum dosyası hâlâ hazırlanıyor"))
+        self.btn_update.setEnabled(ready or not updater.can_self_update())
+        self.banner.show()
+
+    def do_update(self):
+        info = self.update_info
+        if not info:
+            return
+        if not (updater.can_self_update() and info["asset_api"]):
+            QDesktopServices.openUrl(QUrl(info["page"]))
+            return
+        if self.busy():
+            QMessageBox.information(self, APP_NAME, "Önce süren işin bitmesini bekleyin.")
+            return
+        self.btn_update.setEnabled(False)
+        self._ud = UpdateDownload(info, self.settings.value("gh_token", "") or None)
+        self._ud.progress.connect(lambda f: self.banner_text.setText(f"▼ İNDİRİLİYOR  %{int(f * 100)}"))
+        self._ud.done.connect(self.on_update_downloaded)
+        self._ud.start()
+
+    def on_update_downloaded(self, path, err):
+        if err:
+            self.banner_text.setText(f"İndirme başarısız: {err}")
+            self.btn_update.setEnabled(True)
+            return
+        self.save_settings()
+        updater.launch_installer(path)
+        QApplication.quit()
+
+    def ask_token(self):
+        from PySide6.QtWidgets import QInputDialog
+        tok, ok = QInputDialog.getText(
+            self, "GitHub token", "Depo gizliyse, güncellemeleri görmek için salt-okunur bir GitHub token girin\n"
+            "(GitHub > Settings > Developer settings > Fine-grained tokens, yalnızca bu depo, Contents: Read):",
+            QLineEdit.Password, self.settings.value("gh_token", ""))
+        if ok:
+            self.settings.setValue("gh_token", tok.strip())
+            self.check_updates(manual=True)
+
+    def _build_preview_tab(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(0, 16, 0, 0)
+        v.setSpacing(12)
+        self.preview = QLabel(objectName="preview")
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setMinimumSize(640, 360)
+        self.preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.preview.setText("> Bir konu yazıp  [ ARAŞTIR ]  düğmesine basın_")
+        self.wait = WaitScreen()  # iş sürerken: kayayı zirveye iten piksel adam
+        self.preview_stack = QStackedWidget()
+        self.preview_stack.addWidget(self.preview)
+        self.preview_stack.addWidget(self.wait)
+        v.addWidget(self.preview_stack, 1)
+
+        steps = QHBoxLayout()
+        self.step_labels = []
+        for i, s in enumerate(("ARAŞTIRMA", "MEDYA", "SES", "ANİMASYON", "MONTAJ")):
+            l = QLabel(f"[{i + 1:02}] {s}")
+            l.setProperty("class", "step")
+            steps.addWidget(l)
+            self.step_labels.append(l)
+        steps.addStretch(1)
+        v.addLayout(steps)
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 1000)
+        self.bar.setTextVisible(False)
+        v.addWidget(self.bar)
+        h = QHBoxLayout()
+        self.status = QLabel("SİSTEM HAZIR", objectName="status")
+        h.addWidget(self.status, 1)
+        self.btn_open = QPushButton("▶  Videoyu aç")
+        self.btn_open.clicked.connect(lambda: self.open_path(self.last_video))
+        self.btn_folder = QPushButton("Klasörü göster")
+        self.btn_folder.clicked.connect(lambda: self.open_path(os.path.dirname(self.last_video)))
+        self.btn_log = QPushButton("Ayrıntılar")
+        self.btn_log.setCheckable(True)
+        for b in (self.btn_open, self.btn_folder):
+            b.setEnabled(False)
+            h.addWidget(b)
+        h.addWidget(self.btn_log)
+        v.addLayout(h)
+        self.log = QPlainTextEdit(objectName="log")
+        self.log.setReadOnly(True)
+        self.log.setFixedHeight(170)
+        self.log.hide()
+        self.btn_log.toggled.connect(self.log.setVisible)
+        v.addWidget(self.log)
+        return w
+
+    def _build_research_tab(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(0, 16, 0, 0)
+        v.setSpacing(10)
+        self.research_info = QLabel("Araştırma sonuçları burada görünecek. Senaryo yalnızca işaretli bilgilerden "
+                                    "yazılır ve senaryodaki sayılar bunlarla doğrulanır. Kendi PDF, Excel ya da web "
+                                    "kaynağını da aşağıdaki “＋” düğmeleriyle ekleyebilirsin.", objectName="status")
+        self.research_info.setWordWrap(True)
+        v.addWidget(self.research_info)
+        h = QHBoxLayout()
+        self.finding_list = QListWidget()
+        self.finding_list.setMinimumWidth(420)
+        self.finding_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.finding_list.setWordWrap(True)
+        self.finding_list.currentRowChanged.connect(self.show_finding)
+        self.finding_list.itemChanged.connect(lambda _: self.update_research_info())
+        h.addWidget(self.finding_list, 1)
+        self.finding_text = QPlainTextEdit(objectName="log")
+        self.finding_text.setReadOnly(True)
+        h.addWidget(self.finding_text, 1)
+        v.addLayout(h, 1)
+        hb = QHBoxLayout()
+        for label, state in (("Tümünü seç", True), ("Hiçbirini seçme", False)):
+            b = QPushButton(label)
+            b.clicked.connect(lambda _=False, st=state: self.check_all_findings(st))
+            hb.addWidget(b)
+        self.btn_source = QPushButton("Kaynağı aç")
+        self.btn_source.clicked.connect(self.open_finding_source)
+        hb.addWidget(self.btn_source)
+        hb.addSpacing(18)
+        self.btn_add_file = QPushButton("＋ Dosya ekle")
+        self.btn_add_file.setToolTip("Kendi kaynağın: PDF, Excel (xlsx), CSV ya da metin dosyası.\n"
+                                     "Tablolar otomatik grafiğe, il/ülke listeleri haritaya dönüşür.")
+        self.btn_add_file.clicked.connect(self.add_source_file)
+        hb.addWidget(self.btn_add_file)
+        self.btn_add_url = QPushButton("＋ Web adresi ekle")
+        self.btn_add_url.setToolTip("Bir sayfanın metnini ve içindeki tabloları kaynak olarak ekler.")
+        self.btn_add_url.clicked.connect(self.add_source_url)
+        hb.addWidget(self.btn_add_url)
+        hb.addStretch(1)
+        self.btn_write = QPushButton("02 ▸ SEÇİLENLERLE SENARYOYU YAZ", objectName="primary")
+        self.btn_write.clicked.connect(self.start_plan)
+        self.btn_write.setEnabled(False)
+        hb.addWidget(self.btn_write)
+        v.addLayout(hb)
+        return w
+
+    def add_source_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Kaynak dosyası seç", os.path.expanduser("~"),
+                                              "Kaynaklar (*.pdf *.xlsx *.xlsm *.xls *.csv *.tsv *.txt *.md);;"
+                                              "Tüm dosyalar (*)")
+        if path:
+            self._load_source(SourceLoader(path=path), os.path.basename(path))
+
+    def add_source_url(self):
+        url, ok = QInputDialog.getText(self, "Web adresi ekle", "Sayfa, PDF ya da CSV adresi:")
+        if ok and url.strip():
+            self._load_source(SourceLoader(url=url.strip()), url.strip())
+
+    def _load_source(self, loader, name):
+        self.status.setText(f"Kaynak okunuyor: {name}…")
+        self.btn_add_file.setEnabled(False)
+        self.btn_add_url.setEnabled(False)
+        self.loader = loader
+        loader.done.connect(self.on_source_loaded)
+        loader.failed.connect(lambda e: (QMessageBox.warning(self, APP_NAME, f"Kaynak okunamadı:\n{e}"),
+                                         self._source_idle()))
+        loader.start()
+
+    def _source_idle(self):
+        self.btn_add_file.setEnabled(True)
+        self.btn_add_url.setEnabled(True)
+        self.status.setText("")
+
+    def on_source_loaded(self, new):
+        self._source_idle()
+        if self.findings is None:
+            self.findings = []
+        if not getattr(self, "plan_dir", None):
+            prompt = self.prompt.toPlainText().strip() or "kendi kaynaklarim"
+            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+            self.plan_dir = os.path.join(self.outdir.text(), f"{stamp}-{slugify(prompt)}")
+        self.sync_findings()
+        n = len(self.findings)
+        for i, f in enumerate(new):
+            f["id"] = f"u{n + i + 1}"
+        self.findings += new
+        os.makedirs(self.plan_dir, exist_ok=True)
+        pipeline.save_findings(self.findings, self.plan_dir)
+        self.populate_findings()
+        self.finding_list.setCurrentRow(len(self.findings) - 1)
+        self.set_busy(False)
+        kinds = ", ".join("grafik" if f.get("series") else "tablo" if f.get("latest") else "metin" for f in new)
+        self.status.setText(f"{len(new)} kaynak eklendi ({kinds}). Senaryo yazılırken kullanılacak.")
+        self.tabs.setCurrentIndex(1)
+
+    def populate_findings(self):
+        self.finding_list.blockSignals(True)
+        self.finding_list.clear()
+        for f in self.findings or []:
+            it = QListWidgetItem(f"[{f['label']}]  {f['title'][:70]}\n{f['source']}")
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked if f.get("selected", True) else Qt.Unchecked)
+            self.finding_list.addItem(it)
+        self.finding_list.blockSignals(False)
+        if self.finding_list.count():
+            self.finding_list.setCurrentRow(0)
+        else:
+            self.finding_text.setPlainText("Hiç bilgi bulunamadı. İnternet bağlantısını kontrol edin ya da konuyu "
+                                           "farklı yazın. Yine de senaryo yazılabilir (konu başlığıyla sınırlı kalır).")
+        self.update_research_info()
+
+    def sync_findings(self):
+        for i, f in enumerate(self.findings or []):
+            f["selected"] = self.finding_list.item(i).checkState() == Qt.Checked
+        if self.findings is not None and self.plan_dir:
+            os.makedirs(self.plan_dir, exist_ok=True)
+            pipeline.save_findings(self.findings, self.plan_dir)
+
+    def update_research_info(self):
+        n = self.finding_list.count()
+        if not n:
+            return
+        k = sum(1 for i in range(n) if self.finding_list.item(i).checkState() == Qt.Checked)
+        kinds = sorted({f["label"] for f in self.findings or []})
+        self.research_info.setText(f"{n} bilgiden {k} tanesi seçili  ·  kaynaklar: {', '.join(kinds)}")
+
+    def show_finding(self, row):
+        if self.findings and 0 <= row < len(self.findings):
+            f = self.findings[row]
+            self.finding_text.setPlainText(f"{f['title']}\n{f['source']}  ·  {f.get('url') or ''}\n\n{f['text']}")
+
+    def check_all_findings(self, state):
+        for i in range(self.finding_list.count()):
+            self.finding_list.item(i).setCheckState(Qt.Checked if state else Qt.Unchecked)
+
+    def open_finding_source(self):
+        row = self.finding_list.currentRow()
+        if self.findings and 0 <= row < len(self.findings) and self.findings[row].get("url"):
+            QDesktopServices.openUrl(QUrl(self.findings[row]["url"]))
+
+    def _build_editor_tab(self):
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 16, 0, 0)
+        left = QVBoxLayout()
+        self.scene_list = QListWidget()
+        self.scene_list.setFixedWidth(330)
+        self.scene_list.currentRowChanged.connect(self.load_scene)
+        left.addWidget(self.scene_list, 1)
+        tools = QGridLayout()
+        self.add_type = QComboBox()
+        for k, v in SCENE_TYPES.items():
+            self.add_type.addItem(f"{SCENE_ICONS[k]}  {v}", k)
+        add = QPushButton("+ Ekle")
+        add.clicked.connect(self.add_scene)
+        up, down, rm = QPushButton("↑"), QPushButton("↓"), QPushButton("Sil")
+        up.clicked.connect(lambda: self.move_scene(-1))
+        down.clicked.connect(lambda: self.move_scene(1))
+        rm.clicked.connect(self.remove_scene)
+        tools.addWidget(self.add_type, 0, 0, 1, 2)
+        tools.addWidget(add, 0, 2)
+        tools.addWidget(up, 1, 0)
+        tools.addWidget(down, 1, 1)
+        tools.addWidget(rm, 1, 2)
+        left.addLayout(tools)
+        h.addLayout(left)
+
+        right = QVBoxLayout()
+        self.scene_preview = QLabel(objectName="preview")
+        self.scene_preview.setFixedHeight(300)
+        self.scene_preview.setAlignment(Qt.AlignCenter)
+        right.addWidget(self.scene_preview)
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignRight)
+        self.f_type = QComboBox()
+        for k, v in SCENE_TYPES.items():
+            self.f_type.addItem(v, k)
+        self.f_kicker = QLineEdit()
+        self.f_title = QLineEdit()
+        self.f_narr = QPlainTextEdit()
+        self.f_narr.setFixedHeight(70)
+        self.f_narr.setPlaceholderText("Bu sahnede seslendirilecek metin")
+        self.f_dur = QDoubleSpinBox()
+        self.f_dur.setRange(0, 60)
+        self.f_dur.setSuffix(" sn (0 = otomatik)")
+        self.f_data = QPlainTextEdit()
+        self.f_data.setPlaceholderText("Sahneye özel alanlar (JSON): veriler, maddeler, tablo satırları…")
+        form.addRow(QLabel("TÜR", objectName="formlabel"), self.f_type)
+        form.addRow(QLabel("ÜST ETİKET", objectName="formlabel"), self.f_kicker)
+        form.addRow(QLabel("BAŞLIK", objectName="formlabel"), self.f_title)
+        form.addRow(QLabel("ANLATIM", objectName="formlabel"), self.f_narr)
+        form.addRow(QLabel("SÜRE", objectName="formlabel"), self.f_dur)
+        form.addRow(QLabel("VERİLER", objectName="formlabel"), self.f_data)
+        self.f_check = QLabel("")
+        self.f_check.setWordWrap(True)
+        form.addRow(QLabel("DOĞRULAMA", objectName="formlabel"), self.f_check)
+        right.addLayout(form, 1)
+        hb = QHBoxLayout()
+        self.edit_msg = QLabel("", objectName="status")
+        hb.addWidget(self.edit_msg, 1)
+        b = QPushButton("Önizle")
+        b.clicked.connect(lambda: self.save_scene(preview_only=True))
+        hb.addWidget(b)
+        b = QPushButton("Kaydet", objectName="primary")
+        b.clicked.connect(self.save_scene)
+        hb.addWidget(b)
+        right.addLayout(hb)
+        h.addLayout(right, 1)
+        return w
+
+    def _build_library_tab(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(0, 16, 0, 0)
+        self.library = QListWidget()
+        self.library.setIconSize(QSize(192, 108))
+        self.library.itemDoubleClicked.connect(lambda it: self.open_path(it.data(Qt.UserRole)))
+        v.addWidget(self.library, 1)
+        h = QHBoxLayout()
+        b = QPushButton("Yenile")
+        b.clicked.connect(self.refresh_library)
+        h.addWidget(b)
+        b = QPushButton("Senaryoyu düzenlemek için aç")
+        b.clicked.connect(self.load_from_library)
+        h.addWidget(b)
+        h.addStretch(1)
+        v.addLayout(h)
+        return w
+
+    # ---- ayarlar ve küçük yardımcılar ----
+    def _segmented(self, options, current, v):
+        """Yan yana, tek seçimli mekanik düğmeler. Seçili anahtarı .value() ile okunan bir nesne döner."""
+        g = QHBoxLayout()
+        g.setSpacing(6)
+        grp = QButtonGroup(self)
+        grp.setExclusive(True)
+        for key, label in options:
+            b = QToolButton(objectName="seg")
+            b.setText(label)
+            b.setCheckable(True)
+            b.setChecked(key == current)
+            b.setProperty("key", key)
+            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            grp.addButton(b)
+            g.addWidget(b)
+        if not grp.checkedButton():
+            grp.buttons()[0].setChecked(True)
+        grp.value = lambda: grp.checkedButton().property("key")
+        v.addLayout(g)
+        return grp
+
+    def on_music_mode(self, *_):
+        own = self.music_mode.currentData() == "file"
+        self.music.setVisible(own)
+        self.music_btn.setVisible(own)
+
+    def music_choice(self):
+        m = self.music_mode.currentData()
+        return self.music.text().strip() if m == "file" else m
+
+    def pick_music(self):
+        p, _ = QFileDialog.getOpenFileName(self, "Müzik seç", "", "Ses (*.mp3 *.wav *.m4a *.ogg)")
+        if p:
+            self.music.setText(p)
+
+    def pick_outdir(self):
+        p = QFileDialog.getExistingDirectory(self, "Kayıt klasörü", self.outdir.text())
+        if p:
+            self.outdir.setText(p)
+
+    def open_path(self, p):
+        if p and os.path.exists(p):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(p))
+
+    def check_ollama(self):
+        planner.MODEL = self.model.currentText().strip() or planner.MODEL
+        self._oc = OllamaCheck()
+        self._oc.result.connect(self.on_ollama)
+        self._oc.start()
+
+    def on_ollama(self, ok, names):
+        cur = self.model.currentText()
+        self.model.clear()
+        self.model.addItems(names or [cur])
+        self.model.setCurrentText(cur if (cur in names or not names) else names[0])
+        if names:
+            self.ai_status.setText("<span style='color:#FF7A1A'>■ Ollama çalışıyor.</span> Model seçin "
+                                   "(önerilen: qwen3:8b ya da daha büyüğü).")
+        else:
+            self.ai_status.setText(
+                "<span style='color:#FF4D1A'>■ Ollama bulunamadı.</span> Program yine çalışır ama senaryo "
+                "basit kalır. Ücretsiz kurulum: <a style='color:#FF9A3D' href='https://ollama.com/download'>"
+                "ollama.com</a>, sonra komut satırında <b>ollama pull qwen3:8b</b>")
+
+    def set_busy(self, busy):
+        if busy:
+            self._stage = (1, 1)
+            self.wait.start(self.status.text().rstrip("…") if self.status.text() != "SİSTEM HAZIR" else "")
+            self.preview_stack.setCurrentWidget(self.wait)
+        else:
+            self.wait.stop()
+            self.preview_stack.setCurrentWidget(self.preview)
+        self.btn_research.setEnabled(not busy)
+        self.btn_plan.setEnabled(not busy and self.findings is not None)
+        self.btn_write.setEnabled(not busy and self.findings is not None)
+        self.btn_render.setEnabled(not busy and self.plan is not None)
+        self.btn_cancel.setVisible(busy)
+
+    def mark_stage(self, i, n, label):
+        for k, l in enumerate(self.step_labels):
+            l.setProperty("class", "stepdone" if k < i - 1 else ("stepon" if k == i - 1 else "step"))
+            l.style().unpolish(l)
+            l.style().polish(l)
+        self.status.setText(label + "…")
+        self.bar.setValue(0)
+        if self.worker and self.worker.mode in ("research", "plan"):
+            i, n = 1, 1  # tek aşamalı işler: dağın tamamı bu iş
+        self._stage = (i, max(1, n))
+        self.wait.set_stage(label)
+        self.wait.set_progress((i - 1) / max(1, n))
+
+    def append_log(self, s):
+        self.log.appendPlainText(s)
+
+    def show_preview(self, im):
+        pm = pil_to_pixmap(im)
+        self.preview_stack.setCurrentWidget(self.preview)  # çizim başladı: bekleme ekranı yerine kareler
+        self.preview.setPixmap(pm.scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def save_settings(self):
+        s = self.settings
+        s.setValue("prompt", self.prompt.toPlainText())
+        s.setValue("voice_idx", self.voice.currentIndex())
+        s.setValue("music", self.music.text())
+        s.setValue("music_mode", self.music_mode.currentData())
+        s.setValue("sfx", self.sfx.value())
+        s.setValue("vertical", self.vert.value())
+        s.setValue("outdir", self.outdir.text())
+        s.setValue("model", self.model.currentText())
+        s.setValue("length", self.length.value())
+        s.setValue("subs", self.subs.value())
+
+    # ---- iş akışı ----
+    def start_research(self):
+        prompt = self.prompt.toPlainText().strip()
+        if not prompt:
+            QMessageBox.information(self, APP_NAME, "Önce videonun konusunu yazın.")
+            return
+        self.save_settings()
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+        self.plan_dir = os.path.join(self.outdir.text(), f"{stamp}-{slugify(prompt)}")
+        self.research_prompt = prompt
+        self.log.clear()
+        self.tabs.setCurrentIndex(0)
+        self.worker = Worker("research", prompt=prompt, out_dir=self.plan_dir)
+        self._wire(self.worker)
+        self.worker.researched.connect(self.on_researched)
+        self.set_busy(True)
+        self.worker.start()
+
+    def on_researched(self, findings):
+        mine = [f for f in self.findings or [] if f.get("kind") == "user"]  # eklenen kendi kaynakların kalır
+        self.findings = findings + mine
+        if mine:
+            pipeline.save_findings(self.findings, self.plan_dir)
+        self.set_busy(False)
+        self.populate_findings()
+        self.bar.setValue(1000)
+        self.status.setText(f"Araştırma bitti: {len(findings)} bilgi bulundu. İstemediklerinizin işaretini "
+                            f"kaldırıp “Senaryoyu yaz”a basın.")
+        self.tabs.setCurrentIndex(1)
+
+    def start_plan(self):
+        if self.findings is None:
+            return
+        self.save_settings()
+        self.sync_findings()
+        planner.MODEL = self.model.currentText().strip() or planner.MODEL
+        prompt = getattr(self, "research_prompt", None) or self.prompt.toPlainText().strip()
+        self.log.clear()
+        self.tabs.setCurrentIndex(0)
+        self.worker = Worker("plan", prompt=prompt, out_dir=self.plan_dir, findings=self.findings,
+                             opts={"length": self.length.value()})
+        self._wire(self.worker)
+        self.worker.planned.connect(self.on_planned)
+        self.set_busy(True)
+        self.worker.start()
+
+    def start_render(self):
+        if not self.plan:
+            return
+        self.commit_scene_silently()
+        self.save_settings()
+        self.write_plan()
+        opts = {"style": self.style, "voice": self.voice.currentData(), "music": self.music_choice(),
+                "sfx": self.sfx.value() == "1", "vertical": self.vert.value() == "1",
+                "subtitles": self.subs.value() == "1"}
+        self.tabs.setCurrentIndex(0)
+        self.worker = Worker("render", plan=self.plan, out_dir=self.plan_dir, opts=opts)
+        self._wire(self.worker)
+        self.worker.finished_ok.connect(self.on_rendered)
+        self.set_busy(True)
+        self.worker.start()
+
+    def _wire(self, w):
+        w.log.connect(self.append_log)
+        w.stage.connect(self.mark_stage)
+        w.progress.connect(self.on_progress)
+        w.preview.connect(self.show_preview)
+        w.failed.connect(self.on_failed)
+
+    def on_progress(self, f):
+        self.bar.setValue(int(f * 1000))
+        i, n = getattr(self, "_stage", (1, 1))
+        self.wait.set_progress((i - 1 + f) / n)  # bütün işin ilerlemesi: adamın yamaçtaki yeri
+
+    def cancel(self):
+        if self.worker:
+            self.worker.cancel()
+            self.status.setText("İptal ediliyor…")
+
+    def on_planned(self, plan):
+        self.plan = plan
+        self.set_busy(False)
+        self.populate_scenes()
+        chk = plan.get("check")
+        extra = (f"  ·  {chk['missing']} sayı kaynakta bulunamadı (⚠ işaretli sahneler)" if chk and chk["missing"]
+                 else ("  ·  tüm sayılar kaynaklarda doğrulandı ✓" if chk else ""))
+        self.status.setText(f"Senaryo hazır: {len(plan.get('scenes', []))} sahne{extra}")
+        self.bar.setValue(1000)
+        self.tabs.setCurrentIndex(2)
+
+    def on_rendered(self, path):
+        self.set_busy(False)
+        self.last_video = path
+        self.btn_open.setEnabled(True)
+        self.btn_folder.setEnabled(True)
+        self.bar.setValue(1000)
+        for l in self.step_labels:
+            l.setProperty("class", "stepdone")
+            l.style().unpolish(l)
+            l.style().polish(l)
+        self.status.setText(f"Video hazır: {path}")
+        self.refresh_library()
+
+    def on_failed(self, msg):
+        self.set_busy(False)
+        self.status.setText(f"Durdu: {msg}")
+        if msg != "İptal edildi.":
+            self.log.show()
+            self.btn_log.setChecked(True)
+
+    # ---- senaryo düzenleyici ----
+    def populate_scenes(self, select=0):
+        self.scene_list.blockSignals(True)
+        self.scene_list.clear()
+        for i, sc in enumerate(self.plan.get("scenes", [])):
+            t = sc.get("type", "?")
+            name = sc.get("title") or sc.get("caption") or sc.get("label") or ""
+            chk = sc.get("check") or {}
+            mark = "  ⚠" if chk.get("missing") else ("  ✓" if chk.get("verified") else "")
+            it = QListWidgetItem(f"{SCENE_ICONS.get(t, '•')}  {i + 1}. {SCENE_TYPES.get(t, t)}{mark}\n     {name[:34]}")
+            self.scene_list.addItem(it)
+        self.scene_list.blockSignals(False)
+        if self.scene_list.count():
+            self.scene_list.setCurrentRow(min(select, self.scene_list.count() - 1))
+
+    def busy(self):
+        return bool(self.worker and self.worker.isRunning())
+
+    def load_scene(self, row):
+        if self.busy():
+            return
+        if not self.plan or row < 0 or row >= len(self.plan.get("scenes", [])):
+            return
+        sc = self.plan["scenes"][row]
+        self.f_type.setCurrentIndex(max(0, self.f_type.findData(sc.get("type"))))
+        self.f_kicker.setText(sc.get("kicker", ""))
+        self.f_title.setText(sc.get("title") or sc.get("caption") or "")
+        self.f_narr.setPlainText(sc.get("narration", ""))
+        self.f_dur.setValue(float(sc.get("duration") or 0))
+        rest = {k: v for k, v in sc.items() if k not in COMMON_KEYS and k not in ("caption", "check") and not k.startswith("_")}
+        self.f_data.setPlainText(json.dumps(rest, ensure_ascii=False, indent=2))
+        self.edit_msg.setText("")
+        self.show_check(sc)
+        self.scene_preview.setPixmap(pil_to_pixmap(render_still(sc, self.style, size=(533, 300))))
+
+    def show_check(self, sc):
+        c = sc.get("check")
+        if not c:
+            self.f_check.setText("<span style='color:#8C8277'>Bu sahnede kontrol edilecek sayı yok.</span>"
+                                 if self.findings else "<span style='color:#8C8277'>Araştırma verisi yok.</span>")
+        elif c["missing"]:
+            self.f_check.setText(f"<span style='color:#FF4D1A'>⚠ Kaynaklarda bulunamadı: {', '.join(c['missing'])}</span>"
+                                 f"<br><span style='color:#8C8277'>{c['verified']} sayı doğrulandı. Bulunamayanları "
+                                 f"düzeltin ya da silin.</span>")
+        else:
+            self.f_check.setText(f"<span style='color:#FF7A1A'>✓ {c['verified']} sayının hepsi kaynaklarda var.</span>")
+
+    def _scene_from_form(self):
+        rest = json.loads(self.f_data.toPlainText() or "{}")
+        sc = {"type": self.f_type.currentData(), **rest}
+        if self.f_kicker.text():
+            sc["kicker"] = self.f_kicker.text()
+        key = "caption" if sc["type"] in ("image", "video") else "title"
+        sc[key] = self.f_title.text()
+        if self.f_narr.toPlainText().strip():
+            sc["narration"] = self.f_narr.toPlainText().strip()
+        if self.f_dur.value() > 0:
+            sc["duration"] = self.f_dur.value()
+        return sc
+
+    def save_scene(self, preview_only=False):
+        row = self.scene_list.currentRow()
+        if not self.plan or row < 0:
+            return
+        try:
+            sc = self._scene_from_form()
+        except json.JSONDecodeError as e:
+            self.edit_msg.setText(f"<span style='color:#FF4D1A'>Veriler alanında JSON hatası: {e}</span>")
+            return
+        if not self.busy():
+            self.scene_preview.setPixmap(pil_to_pixmap(render_still(sc, self.style, size=(533, 300))))
+        if preview_only:
+            self.edit_msg.setText("Önizleme güncellendi (henüz kaydedilmedi).")
+            return
+        if self.findings:
+            from .factcheck import check_scene, source_numbers
+            c = check_scene(sc, source_numbers(self.findings))
+            if c["verified"] or c["missing"]:
+                sc["check"] = c
+        self.plan["scenes"][row] = sc
+        self.show_check(sc)
+        self.write_plan()
+        self.populate_scenes(row)
+        self.edit_msg.setText("<span style='color:#FF7A1A'>Kaydedildi.</span>")
+
+    def commit_scene_silently(self):
+        row = self.scene_list.currentRow()
+        if self.plan and row >= 0:
+            try:
+                old = self.plan["scenes"][row]
+                sc = self._scene_from_form()
+                if old.get("check") and sc == {k: v for k, v in old.items() if k != "check"}:
+                    sc["check"] = old["check"]
+                self.plan["scenes"][row] = sc
+            except Exception:
+                pass
+
+    def add_scene(self):
+        if self.plan is None:
+            self.plan = {"title": "Yeni video", "language": "tr", "scenes": []}
+            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+            self.plan_dir = os.path.join(self.outdir.text(), f"{stamp}-elle")
+            self.btn_render.setEnabled(True)
+        row = self.scene_list.currentRow() + 1
+        self.plan["scenes"].insert(row, json.loads(json.dumps(SAMPLE_SCENES[self.add_type.currentData()])))
+        self.populate_scenes(row)
+
+    def move_scene(self, d):
+        row = self.scene_list.currentRow()
+        sc = self.plan["scenes"] if self.plan else []
+        if 0 <= row < len(sc) and 0 <= row + d < len(sc):
+            sc[row], sc[row + d] = sc[row + d], sc[row]
+            self.populate_scenes(row + d)
+
+    def remove_scene(self):
+        row = self.scene_list.currentRow()
+        if self.plan and 0 <= row < len(self.plan["scenes"]):
+            del self.plan["scenes"][row]
+            self.populate_scenes(row)
+
+    def write_plan(self):
+        if self.plan and self.plan_dir:
+            os.makedirs(self.plan_dir, exist_ok=True)
+            with open(os.path.join(self.plan_dir, "plan.json"), "w", encoding="utf-8") as f:
+                json.dump(self.plan, f, ensure_ascii=False, indent=2)
+
+    # ---- kitaplık ----
+    def refresh_library(self):
+        self.library.clear()
+        base = self.outdir.text()
+        if not os.path.isdir(base):
+            return
+        for d in sorted(os.listdir(base), reverse=True):
+            full = os.path.join(base, d)
+            plan_p = os.path.join(full, "plan.json")
+            vid = os.path.join(full, "video.mp4")
+            if not os.path.isfile(plan_p):
+                continue
+            title = d
+            try:
+                with open(plan_p, encoding="utf-8") as f:
+                    title = json.load(f).get("title") or d
+            except Exception:
+                pass
+            state = "video hazır" if os.path.exists(vid) else "sadece senaryo"
+            it = QListWidgetItem(f"{title}\n{d} · {state}")
+            it.setData(Qt.UserRole, vid if os.path.exists(vid) else plan_p)
+            it.setData(Qt.UserRole + 1, full)
+            self.library.addItem(it)
+
+    def load_from_library(self):
+        it = self.library.currentItem()
+        if not it:
+            return
+        full = it.data(Qt.UserRole + 1)
+        with open(os.path.join(full, "plan.json"), encoding="utf-8") as f:
+            self.plan = json.load(f)
+        self.plan_dir = full
+        self.prompt.setPlainText(self.plan.get("prompt", self.plan.get("title", "")))
+        self.findings = pipeline.load_findings(full)
+        self.populate_findings()
+        self.populate_scenes()
+        self.btn_render.setEnabled(True)
+        self.btn_plan.setEnabled(bool(self.findings))
+        self.tabs.setCurrentIndex(2)
+
+    def closeEvent(self, e):
+        self.save_settings()
+        if self.worker and self.worker.isRunning():
+            self.worker.cancel()
+            self.worker.wait(3000)
+        super().closeEvent(e)
+
+
+def run_app():
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    for f in ("Inter-Regular.ttf", "Inter-SemiBold.ttf", "Inter-ExtraBold.ttf", "JetBrainsMono-Regular.ttf",
+              "JetBrainsMono-Bold.ttf", "JetBrainsMono-ExtraBold.ttf"):
+        QFontDatabase.addApplicationFont(os.path.join(theme.FONT_DIR, f))
+    icon = os.path.join(HERE, "assets", "icon.png")
+    if os.path.exists(icon):
+        app.setWindowIcon(QIcon(icon))
+    app.setStyleSheet(app_stylesheet())
+    if os.environ.get("PV_NO_SPLASH"):
+        w = MainWindow()
+        w.show()
+        return app.exec()
+    from .splash import Splash
+    sp = Splash(__version__, sound=not os.environ.get("PV_SPLASH_MUTE"))
+    sp.start()
+    app.processEvents()
+    w = MainWindow()  # açılış efekti oynarken ana pencere arkada hazırlanır
+    def reveal():  # ana pencere açılış solarken yumuşakça belirir
+        from PySide6.QtCore import QPropertyAnimation, QEasingCurve
+        w.setWindowOpacity(0.0)
+        w.show()
+        w._fade = QPropertyAnimation(w, b"windowOpacity")
+        w._fade.setDuration(450)
+        w._fade.setStartValue(0.0)
+        w._fade.setEndValue(1.0)
+        w._fade.setEasingCurve(QEasingCurve.InOutCubic)
+        w._fade.start()
+
+    sp.finished.connect(reveal)
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(run_app())

@@ -1,0 +1,12 @@
+pycairo>=1.25
+pillow>=10
+requests>=2.31
+pandas>=2.0
+lxml>=5.0
+edge-tts>=7.0
+gTTS>=2.5
+ddgs>=9.0
+PySide6-Essentials>=6.6
+imageio-ffmpeg>=0.5
+pypdf>=4.0
+openpyxl>=3.1

@@ -1,0 +1,10 @@
+Harita verileri
+
+dunya.json
+  world-atlas 2.0.2 (countries-110m) — Copyright 2013-2019 Michael Bostock, ISC lisansı.
+  Temel veri: Natural Earth (kamu malı). Natural Earth projeksiyonuna dönüştürüldü,
+  Türkçe ülke adları pycountry (iso-codes, LGPL çevirileri) ile eklendi.
+
+turkiye_iller.json
+  turkey-map-react 2.0.6 — github.com/erdigokce/turkey-map-react, MIT lisansı.
+  SVG il yolları çokgenlere çevrildi.

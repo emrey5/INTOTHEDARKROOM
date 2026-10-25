@@ -1,0 +1,31 @@
+{
+  "title": "Türkiye'nin Nüfus Yolculuğu",
+  "language": "tr",
+  "scenes": [
+    {"type": "title", "title": "Türkiye'nin Nüfus Yolculuğu", "subtitle": "1960'tan bugüne rakamlarla bir hikâye (demo, yaklaşık veriler)",
+     "narration": "Türkiye'nin nüfusu son altmış yılda üç katından fazla arttı. Gelin bu yolculuğa rakamlarla bakalım."},
+    {"type": "stat", "kicker": "Türkiye · 2023", "value": 85.3, "suffix": " milyon", "decimals": 1, "label": "kişi yaşıyor", "source": "Demo verisi (yaklaşık, Dünya Bankası)",
+     "narration": "Bugün Türkiye'de yaklaşık seksen beş milyon kişi yaşıyor."},
+    {"type": "line", "kicker": "Nüfus", "title": "Türkiye nüfusu (milyon kişi)", "unit": "milyon",
+     "series": [{"name": "Türkiye", "data": [{"x": "1960", "y": 27.5}, {"x": "1970", "y": 35.0}, {"x": "1980", "y": 44.1}, {"x": "1990", "y": 54.3}, {"x": "2000", "y": 64.1}, {"x": "2010", "y": 73.2}, {"x": "2020", "y": 84.1}, {"x": "2023", "y": 85.3}]}],
+     "source": "Demo verisi (yaklaşık, Dünya Bankası)",
+     "narration": "1960'ta yirmi yedi buçuk milyon olan nüfus, her on yılda yaklaşık on milyon kişi arttı."},
+    {"type": "bar", "kicker": "Şehirler", "title": "En kalabalık iller (milyon kişi)", "unit": "milyon", "highlight": "İstanbul",
+     "data": [{"label": "İstanbul", "value": 15.66}, {"label": "Ankara", "value": 5.80}, {"label": "İzmir", "value": 4.48}, {"label": "Bursa", "value": 3.21}, {"label": "Antalya", "value": 2.70}, {"label": "Konya", "value": 2.32}, {"label": "Adana", "value": 2.27}],
+     "source": "Demo verisi (yaklaşık, TÜİK ADNKS)",
+     "narration": "Nüfusun büyük kısmı batıdaki büyük şehirlerde. İstanbul tek başına on beş milyonu aşıyor."},
+    {"type": "pie", "kicker": "Yaş yapısı", "title": "Yaş gruplarına göre nüfus", "unit": "yüzde",
+     "data": [{"label": "0-14 yaş", "value": 21}, {"label": "15-64 yaş", "value": 69}, {"label": "65 yaş ve üzeri", "value": 10}],
+     "source": "Demo verisi (yaklaşık, TÜİK)",
+     "narration": "Nüfusun yaklaşık yüzde altmış dokuzu çalışma çağında. Ancak altmış beş yaş üstünün payı hızla artıyor."},
+    {"type": "table", "kicker": "Özet", "title": "On yıllara göre nüfus", "columns": ["Yıl", "Nüfus (milyon)", "Artış"],
+     "rows": [["1960", "27,5", "-"], ["1980", "44,1", "+16,6"], ["2000", "64,1", "+20,0"], ["2010", "73,2", "+9,1"], ["2023", "85,3", "+12,1"]],
+     "source": "Demo verisi (yaklaşık, Dünya Bankası)",
+     "narration": "Tabloda görüldüğü gibi artış hızı son yıllarda yavaşlıyor."},
+    {"type": "bullets", "kicker": "Gelecek", "title": "Önümüzdeki on yıllarda neler bekleniyor?",
+     "items": ["Doğurganlık oranı nüfusun yenilenme seviyesinin altında", "Yaşlı nüfusun payı artmaya devam edecek", "Büyük şehirlere göç sürüyor"],
+     "narration": "Doğurganlığın düşmesi ve yaşlanan nüfus, önümüzdeki on yılların ana başlıkları olacak."},
+    {"type": "outro", "title": "İzlediğiniz için teşekkürler", "sources": ["Dünya Bankası - SP.POP.TOTL", "TÜİK - Adrese Dayalı Nüfus Kayıt Sistemi", "Not: Bu demo videodaki rakamlar yaklaşıktır"],
+     "narration": "Kaynaklar ekranda. İzlediğiniz için teşekkürler."}
+  ]
+}
