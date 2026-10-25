@@ -389,7 +389,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(scroll)
 
         v.addWidget(QLabel("▌DARKROOM", objectName="brand"))
-        v.addWidget(QLabel("// PROMPT → VIDEO · veri destekli animasyon motoru", objectName="brandsub"))
+        v.addWidget(QLabel("credit by EC", objectName="brandsub"))
 
         v.addWidget(self._section("Konu"))
         self.prompt = QPlainTextEdit()
