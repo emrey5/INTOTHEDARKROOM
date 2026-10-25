@@ -24,11 +24,22 @@ Kurulumu denemek için: `DARKROOM.exe --selftest deneme` (2 sahnelik deneme vide
 yazdığından stili, müziği, tempoyu, süreyi, formatı (Shorts, Instagram), dili, sesi ve rengi kendisi seçer,
 seçtiklerini kutunun altında gösterir; araştırma, senaryo ve video kendiliğinden art arda yapılır.
 Programın sorduğu tek şey **video türü**: Gerçekçi (gerçek görüntüler), Çizgi animasyon, İnfografik,
-Haber bülteni, Kinetik yazı (büyük hareketli yazılar), Karakter anlatıyor, Retro piksel (8-bit oyun görünümü
-ve müziği). Tür senaryonun yapısını ve görünümü belirler; promptta "çizgi film", "retro" gibi bir tür
+Haber bülteni, Kinetik yazı (büyük hareketli yazılar), Karakter anlatıyor, Hikâye animasyonu, Retro piksel
+(8-bit oyun görünümü ve müziği). Tür senaryonun yapısını ve görünümü belirler; promptta "çizgi film", "retro" gibi bir tür
 geçiyorsa kendiliğinden seçilir. Örnekler: "Shorts için kısa bir video: Kahvenin dünyaya yayılış hikâyesi", "Osmanlı İmparatorluğu'nun
 yükselişi, detaylı, 4K", "Çözülemeyen cinayetler, kadın sesiyle". Her şeyi elle seçmek ya da senaryoyu
 düzenlemek için sağ üstteki **⚙ Gelişmiş mod**.
+
+**Hikâye animasyonu:** yapay zekâ (Ollama) kancayla açılan, gerilimi artan, sonunda bir dönüş ve izleyiciye
+soru olan kısa bir hikâye yazar; her sahnenin resmini **senin ekran kartın** çizer (Stable Diffusion XL +
+SDXL-Lightning, ücretsiz ComfyUI ile; 8 GB NVIDIA kartta sahne başına birkaç saniye). Ana karakterin tarifi ve
+sabit bir tohum her resimde kullanılır, böylece karakter sahneden sahneye aynı kalır. Program resimlere kamera
+hareketi (yakınlaşma, kaydırma), seslendirme, kelime kelime büyük altyazı (söylenen kelime sarı), geçişler,
+müzik ve efekt ekler. Shorts seçilirse video baştan dikey (1080x1920) çizilir, resimler de dikey üretilir.
+Araştırma yapılmaz. Görsel motoru bir kez kurulur (≈9 GB): türü seçince üstte çıkan **⚡ GÖRSEL MOTORUNU KUR**
+düğmesi. **🎮 YAVAŞ KUR** indirme hızını saniyede 3 MB ile sınırlar, oyun oynarken internet yavaşlamaz;
+**■ DURDUR** ile kesilen indirme sonra kaldığı yerden sürer. Çizim bitince ekran kartının belleği boşaltılır.
+Motor kurulu değilse video yine yapılır, resimler yerine sade zeminler kullanılır.
 
 Gelişmiş modda:
 - **Konu** kutusuna videonun konusunu yazın ya da örneklerden birine tıklayın.
@@ -119,13 +130,19 @@ python -m promptvideo "..." --square --tempo hizli --music auto:epik --music-vol
 En iyi sonuç için önce `--plan-only` çalıştırıp `plan.json`'daki rakamları ve metinleri
 kontrol edin, sonra `--plan` ile çizin. Planı elle yazmak da mümkün.
 
+Hikâye: `python -m promptvideo "Mars'ta kaybolan cesur bir kedi" --kind hikaye --vertical`.
+Görsel motorunu komut satırından kurmak için `python -m promptvideo --setup-images` (yavaş mod: `--slow`).
+
 ## Sahne türleri (plan.json)
 
 `title`, `bullets`, `stat`, `bar`, `line` (birden çok seri olabilir), `pie`, `table`,
 `image` (`image_query` / `image_url` / `image_path`), `video` (`stock_query` / `video_path`),
 `character` (çizgi karakterler konuşur; her karakterin kendi sesi, `backdrop`: studio, city, office, space,
 lab, nature), `versus`, `people` (piktogram), `map` (`world` ya da `turkey`), `timeline` (yıllara göre olaylar),
-`compare` (önce / sonra), `outro`. Alanların tam örneği `promptvideo/planner.py` içindeki `SCHEMA`'da ve
+`compare` (önce / sonra), `kinetic`, `outro`. Hikâye planında (`"kind": "hikaye"`) planın `character`
+(İngilizce karakter tarifi), `art_style` (cartoon, anime, comic, realistic, storybook) ve `seed` alanları ile
+`story` sahneleri (`image_prompt`, `narration`, `camera`: zoom_in, zoom_out, pan_left, pan_right, pan_up,
+pan_down) bulunur. Alanların tam örneği `promptvideo/planner.py` içindeki `SCHEMA`'da ve
 `ornekler/demo_plan.json`'da.
 
 ## Ayarlar (ortam değişkenleri)
@@ -137,14 +154,18 @@ lab, nature), `versus`, `people` (piktogram), `map` (`world` ya da `turkey`), `t
 | `PV_VOICE` | `tr-TR-AhmetNeural` | Ses |
 | `PV_PRESET` / `PV_CRF` | `medium` / `19` | Kodlama hızı / kalitesi (düşük CRF = daha kaliteli, büyük dosya) |
 | `PV_NO_SPLASH` / `PV_SPLASH_MUTE` | boş | `1` yapılırsa açılış efekti hiç gösterilmez / sessiz oynar |
+| `PV_COMFY` | `http://127.0.0.1:8188` | Görsel motoru (ComfyUI) adresi; kendi ComfyUI'nizi de kullanabilirsiniz |
 | `PV_STYLE` | `mekanik` | Komut satırındaki varsayılan görünüm (`mekanik` / `cizgi` / `modern`); `--style` ile de seçilir |
 
 ## Sınırlar
 
 - "Higgsfield kalitesi"ndeki yapay zekâ ile üretilmiş sinematik klipler ücretsiz bir API ile
   yapılamıyor. Bu sürüm onların yerine Wikimedia/Pexels'teki gerçek videoları kullanıyor.
-  Güçlü bir NVIDIA ekran kartınız varsa (12 GB+ VRAM) açık kaynak Wan 2.x modeli yerel olarak
-  eklenebilir.
+  Hikâye animasyonunda resimler ekran kartında çizilir ama hareket kamera ile verilir; resimlerin kendisi
+  canlanmaz. Gerçek hareketli klip (Wan 2.x gibi) için 12 GB+ VRAM gerekir.
+- Görsel motorunun otomatik kurulumu yalnızca Windows ve NVIDIA kartlar için. Başka sistemlerde ComfyUI'yi
+  elle kurup çalıştırırsanız program onu kullanır (`sd_xl_base_1.0.safetensors` ve
+  `sdxl_lightning_4step_lora.safetensors` modelleriyle).
 - Kural tabanlı planlayıcı (Ollama yokken) basit kalır; asıl kalite Ollama ile gelir.
 - Model bazen yanlış sayı yazabilir; yayınlamadan önce `plan.json`'u kontrol edin.
 

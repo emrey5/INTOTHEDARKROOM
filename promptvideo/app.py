@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from . import theme, pipeline, planner, scenes, updater, userdata, __version__
 from .waitscreen import WaitScreen
-from . import ollama_setup, autoset, kinds
+from . import ollama_setup, autoset, kinds, imagegen
 from . import draw as D
 from .render import render_frame
 
@@ -33,11 +33,11 @@ SCENE_TYPES = {
     "line": "Çizgi grafik", "pie": "Pasta grafik", "table": "Tablo", "image": "Görsel",
     "video": "Video klip", "character": "Karakter konuşur", "versus": "Karşılaştırma (VS)",
     "people": "İnsan piktogramı", "map": "Harita", "timeline": "Zaman çizelgesi",
-    "compare": "Önce / sonra", "kinetic": "Kinetik yazı", "outro": "Kapanış",
+    "compare": "Önce / sonra", "kinetic": "Kinetik yazı", "story": "Hikâye sahnesi", "outro": "Kapanış",
 }
 SCENE_ICONS = {"title": "✦", "bullets": "☰", "stat": "#", "bar": "▤", "line": "📈", "pie": "◔",
                "table": "▦", "image": "🖼", "video": "🎬", "character": "☺", "versus": "⚔",
-               "people": "☷", "map": "🗺", "timeline": "⏱", "compare": "⇄", "kinetic": "Aa", "outro": "★"}
+               "people": "☷", "map": "🗺", "timeline": "⏱", "compare": "⇄", "kinetic": "Aa", "story": "🎨", "outro": "★"}
 VOICES_BY_LANG = {
     "tr": [("Ahmet (erkek)", "tr-TR-AhmetNeural"), ("Emel (kadın)", "tr-TR-EmelNeural"), ("Sessiz", "")],
     "en": [("Andrew (erkek)", "en-US-AndrewNeural"), ("Ava (kadın)", "en-US-AvaNeural"),
@@ -105,6 +105,8 @@ SAMPLE_SCENES = {
                             {"year": "2000", "text": "Üçüncü olay"}]},
     "compare": {"type": "compare", "kicker": "Önce / sonra", "title": "Başlık", "unit": "",
                 "before": {"label": "2000", "value": 10, "text": ""}, "after": {"label": "2024", "value": 25, "text": ""}},
+    "story": {"type": "story", "narration": "Ve o gece her şey değişti.", "camera": "zoom_in",
+              "image_prompt": "the main character looking up at a glowing night sky, wide shot", "show_character": True},
     "kinetic": {"type": "kinetic", "kicker": "Biliyor muydunuz?", "narration": "Kahve 15. yüzyılda Yemen'de içilmeye başlandı."},
     "outro": {"type": "outro", "title": "İzlediğiniz için teşekkürler", "sources": []},
 }
@@ -263,6 +265,9 @@ def render_still(scene, style, t=None, size=(960, 540), accent="", bg="", subs=N
     """Tek bir sahnenin bir karesini (varsayılan: animasyonlar bitmişken) çizer.
     subs: altyazı ayarları verilirse anlatım altyazı olarak da çizilir."""
     from PIL import Image
+    if scene.get("type") == "story":  # resmi ekran kartı çizer; önizlemede zemin + altyazı
+        from . import story
+        return story.still(scene, size, accent)
     theme.apply_style(style, accent=accent or "", bg=bg or "")
     key = (style, bg)
     D._paper = None if getattr(render_still, "_key", None) != key else D._paper
@@ -465,7 +470,9 @@ class Worker(QThread):
                 w.progress.emit(float(frac))
 
             def preview(self, im):
-                w.preview.emit(im.resize((960, 540)))
+                im = im.copy()
+                im.thumbnail((960, 540))  # dikey kareler (hikâye/Shorts) de oranı bozulmadan görünür
+                w.preview.emit(im)
 
             def cancelled(self):
                 return w._cancel.is_set()
@@ -579,6 +586,25 @@ class OllamaSetup(QThread):
         try:
             ok, why = ollama_setup.ensure(self.model, lambda f, msg: self.progress.emit(f, msg),
                                           lambda m: self.progress.emit(None, m), self._cancel.is_set)
+            self.done.emit(ok, why)
+        except Exception as e:
+            self.done.emit(False, str(e))
+
+
+class ImageSetup(QThread):
+    """Tek tıkla görsel motoru: ComfyUI + çizim modelleri (Windows). slow: oyun modu, hız sınırlı."""
+    progress = Signal(object, str)
+    done = Signal(bool, str)
+
+    def __init__(self, slow=False):
+        super().__init__()
+        self.slow = slow
+        self._cancel = threading.Event()
+
+    def run(self):
+        try:
+            ok, why = imagegen.install(lambda f, msg: self.progress.emit(f, msg),
+                                       lambda m: self.progress.emit(None, m), self._cancel.is_set, self.slow)
             self.done.emit(ok, why)
         except Exception as e:
             self.done.emit(False, str(e))
@@ -777,6 +803,7 @@ class MainWindow(QMainWindow):
         l.setContentsMargins(24, 12, 24, 20)
         l.addWidget(self._build_update_banner())
         l.addWidget(self._build_ai_banner())
+        l.addWidget(self._build_img_banner())
         l.addWidget(self._build_simple_panel())
         l.addWidget(self.tabs)
         return w
@@ -838,6 +865,7 @@ class MainWindow(QMainWindow):
     def _on_kind_clicked(self, *_):
         self._kind_locked = True  # kullanıcı seçti: prompt artık türü değiştirmez
         self.update_auto_info()
+        self.check_image_engine(self.kind_sel.value())
 
     def set_simple(self, on):
         self.simple = on
@@ -862,6 +890,7 @@ class MainWindow(QMainWindow):
             return
         if not self._kind_locked:
             self.kind_sel.set_value(kinds.detect(text) or kinds.DEFAULT)
+            self.check_image_engine(self.kind_sel.value())
         _, why, topic = autoset.infer(text, self.kind_sel.value())
         self.auto_info.setText(f"KONU ▸ {topic}\nSEÇİLENLER ▸ " + "  ·  ".join(why))
 
@@ -879,6 +908,14 @@ class MainWindow(QMainWindow):
         self.auto_chain = True
         self.log.clear()
         self.append_log("Seçilen ayarlar: " + " · ".join(why))
+        if not kinds.needs_research(opts.get("kind")):  # hikâye: araştırma yok, doğrudan senaryo
+            self.save_settings()
+            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+            self.plan_dir = os.path.join(self.outdir.text(), f"{stamp}-{slugify(topic)}")
+            self.research_prompt = text
+            self.findings = []
+            self.start_plan()
+            return
         self.start_research()
 
     def _build_ai_banner(self):
@@ -905,6 +942,97 @@ class MainWindow(QMainWindow):
         h.addWidget(later)
         self.ai_banner.hide()
         return self.ai_banner
+
+    def _build_img_banner(self):
+        """Hikâye animasyonu seçilip görsel motoru kurulu değilse görünür."""
+        self.img_banner = QFrame(objectName="banner")
+        h = QHBoxLayout(self.img_banner)
+        h.setContentsMargins(14, 8, 8, 8)
+        col = QVBoxLayout()
+        self.img_banner_text = QLabel("", objectName="bannertext")
+        self.img_banner_text.setWordWrap(True)
+        col.addWidget(self.img_banner_text)
+        self.img_banner_bar = QProgressBar()
+        self.img_banner_bar.setRange(0, 1000)
+        self.img_banner_bar.setTextVisible(False)
+        self.img_banner_bar.setFixedHeight(5)
+        self.img_banner_bar.hide()
+        col.addWidget(self.img_banner_bar)
+        h.addLayout(col, 1)
+        self.btn_img_fast = QPushButton("⚡ GÖRSEL MOTORUNU KUR", objectName="primary")
+        self.btn_img_fast.setToolTip("Tam hızda indirir (≈9 GB).")
+        self.btn_img_fast.clicked.connect(lambda: self.setup_images(False))
+        self.btn_img_slow = QPushButton("🎮 YAVAŞ KUR")
+        self.btn_img_slow.setToolTip(f"İndirme hızını saniyede {imagegen.SLOW_MB} MB ile sınırlar: oyun oynarken "
+                                     "ya da video izlerken internet yavaşlamaz (≈1 saat).")
+        self.btn_img_slow.clicked.connect(lambda: self.setup_images(True))
+        self.btn_img_stop = QPushButton("■ DURDUR")
+        self.btn_img_stop.setToolTip("İndirmeyi durdurur; sonra kaldığı yerden devam eder.")
+        self.btn_img_stop.clicked.connect(lambda: getattr(self, "_img_setup", None) and self._img_setup._cancel.set())
+        self.btn_img_stop.hide()
+        later = QPushButton("SONRA")
+        later.clicked.connect(self.img_banner.hide)
+        for b in (self.btn_img_fast, self.btn_img_slow, self.btn_img_stop, later):
+            h.addWidget(b)
+        self.img_banner.hide()
+        return self.img_banner
+
+    def check_image_engine(self, kind=None):
+        """Hikâye türü seçiliyken görsel motoru yoksa kurulum şeridini gösterir."""
+        kind = kind or (self.kind_sel.value() if getattr(self, "simple", False) else self.kind_combo.currentData())
+        if kind != "hikaye" or imagegen.installed() or (getattr(self, "_img_setup", None) and self._img_setup.isRunning()):
+            if kind != "hikaye" and not (getattr(self, "_img_setup", None) and self._img_setup.isRunning()):
+                self.img_banner.hide()
+            return
+        self.img_banner_text.setText(
+            "HİKÂYE ANİMASYONU İÇİN GÖRSEL MOTORU GEREKLİ: SAHNELERİ SENİN EKRAN KARTIN ÇİZER (NVIDIA, 8 GB+). "
+            f"BİR KEZ KURULUR, ≈{imagegen.TOTAL_GB:.0f} GB, ÜCRETSİZ. KURULMAZSA RESİMLER YERİNE SADE ZEMİN KULLANILIR.")
+        self.img_banner.show()
+
+    def setup_images(self, slow):
+        if sys.platform != "win32" and not imagegen.server_up():
+            QMessageBox.information(self, APP_NAME, imagegen.install(None, None)[1])
+            return
+        msg = (f"Ücretsiz görsel motoru (ComfyUI) ve çizim modeli indirilecek: ≈{imagegen.TOTAL_GB:.0f} GB.\n\n"
+               + (f"Yavaş mod: hız saniyede {imagegen.SLOW_MB} MB ile sınırlı, yaklaşık 1 saat sürer; oyun "
+                  "oynarken internetin yavaşlamaz." if slow else
+                  "Tam hız: 100 Mbit internetle yaklaşık 15 dakika. İnternetin bu sırada yavaşlayabilir.")
+               + "\n\nİstediğin an durdurabilirsin; sonra kaldığı yerden devam eder. Başlatılsın mı?")
+        if QMessageBox.question(self, APP_NAME, msg) != QMessageBox.Yes:
+            return
+        for b in (self.btn_img_fast, self.btn_img_slow):
+            b.hide()
+        self.btn_img_stop.show()
+        self.img_banner_bar.setValue(0)
+        self.img_banner_bar.show()
+        self.img_banner.show()
+        self._img_setup = ImageSetup(slow)
+        self._img_setup.progress.connect(self.on_img_progress)
+        self._img_setup.done.connect(self.on_img_setup_done)
+        self._img_setup.start(QThread.LowPriority)  # bilgisayarı (ve oyunu) yormasın
+
+    def on_img_progress(self, frac, msg):
+        self.img_banner_text.setText(msg.upper())
+        if frac is None:
+            self.img_banner_bar.setRange(0, 0)
+        else:
+            self.img_banner_bar.setRange(0, 1000)
+            self.img_banner_bar.setValue(int(frac * 1000))
+
+    def on_img_setup_done(self, ok, why):
+        self.img_banner_bar.hide()
+        self.btn_img_stop.hide()
+        for b in (self.btn_img_fast, self.btn_img_slow):
+            b.show()
+        if ok:
+            self.img_banner_text.setText("GÖRSEL MOTORU HAZIR ✓  ARTIK HİKÂYE ANİMASYONLARININ SAHNELERİNİ EKRAN KARTIN ÇİZECEK.")
+            for b in (self.btn_img_fast, self.btn_img_slow):
+                b.hide()
+            QTimer.singleShot(6000, self.img_banner.hide)
+        elif "İptal" in why:
+            self.img_banner_text.setText("İNDİRME DURDURULDU. TEKRAR BASINCA KALDIĞI YERDEN DEVAM EDER.")
+        else:
+            self.img_banner_text.setText(f"GÖRSEL MOTORU KURULAMADI: {why}")
 
     # ---- güncelleme ----
     def _build_update_banner(self):
@@ -1522,6 +1650,7 @@ class MainWindow(QMainWindow):
         if kd.get("music"):
             o["music_mode"] = kd["music"]
         self.set_options(o)
+        self.check_image_engine(o["kind"])
 
     def look(self):
         """Videonun görünümü: (stil, vurgu, arka plan)."""

@@ -60,7 +60,9 @@ def youtube_text(plan, sc_list, path):
             if s and s not in srcs:
                 srcs.append(s)
     words = re.findall(r"[\wçğıöşüÇĞİÖŞÜ]{4,}", " ".join([title] + [sc.get("kicker", "") for sc in sc_list]))
-    tags = list(dict.fromkeys(w.lower() for w in words))[:15] + ["bilgi", "belgesel", "veri", "infografik"]
+    tags = list(dict.fromkeys(w.lower() for w in words))[:15] + (["hikaye", "animasyon", "kısa hikaye", "shorts"]
+                                                         if plan.get("kind") == "hikaye" else
+                                                         ["bilgi", "belgesel", "veri", "infografik"])
     lines = [f"BAŞLIK\n{title}\n", "AÇIKLAMA", desc, ""]
     ch = chapters(sc_list)
     if ch:

@@ -19,11 +19,12 @@ def main(argv=None):
     ap.add_argument("--voice", help="edge-tts ses adı, ör. tr-TR-EmelNeural")
     ap.add_argument("--music", help="Arka plan müziği: dosya yolu ya da auto:sakin / enerjik / gizemli / epik / gerilim / retro")
     ap.add_argument("--no-sfx", action="store_true", help="Ses efektlerini kapat")
-    ap.add_argument("--vertical", action="store_true", help="Ayrıca 9:16 dikey (Shorts) sürüm üret")
+    ap.add_argument("--vertical", action="store_true", help="Ayrıca 9:16 dikey (Shorts) sürüm üret (hikâyede video baştan dikey çizilir)")
     ap.add_argument("--plan-only", action="store_true", help="Sadece planı oluştur, videoyu çizme")
     ap.add_argument("--square", action="store_true", help="Ayrıca 1:1 kare sürüm üret")
-    ap.add_argument("--kind", choices=["gercekci", "cizgi", "infografik", "haber", "kinetik", "karakter", "piksel"],
-                    help="Video türü (senaryo ve görünüm buna göre)")
+    from .kinds import KINDS
+    ap.add_argument("--kind", choices=list(KINDS),
+                    help="Video türü (senaryo ve görünüm buna göre); hikaye: resimleri ekran kartı çizer")
     ap.add_argument("--style", choices=["mekanik", "modern", "belgesel", "haber", "minimal", "cizgi", "piksel"],
                     help="Görünüm (varsayılan: mekanik)")
     ap.add_argument("--accent", help="Vurgu rengi, ör. #FF7A1A")
@@ -35,8 +36,15 @@ def main(argv=None):
     ap.add_argument("--length", choices=["kisa", "orta", "uzun"], default="orta", help="Video süresi")
     ap.add_argument("--subtitles", action="store_true", help="Altyazıyı videonun üstüne yaz")
     ap.add_argument("--no-voice", action="store_true", help="Seslendirmeyi kapat")
+    ap.add_argument("--setup-images", action="store_true", help="Görsel motorunu (ComfyUI + çizim modeli, ≈9 GB) kur")
+    ap.add_argument("--slow", action="store_true", help="--setup-images ile: indirme hızını sınırla (oyun modu)")
     ap.add_argument("--gui", action="store_true", help="Masaüstü uygulamasını aç")
     a = ap.parse_args(argv)
+    if a.setup_images:
+        from . import imagegen
+        ok, why = imagegen.install(lambda f, m: print(m, flush=True), print, slow=a.slow)
+        print("Görsel motoru hazır." if ok else why)
+        return 0 if ok else 1
     if a.gui or (not a.prompt and not a.plan):
         from .app import run_app
         return run_app()
