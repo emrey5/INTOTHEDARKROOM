@@ -99,14 +99,14 @@ def srt_time(s):
 
 
 
-def create_plan(prompt, out_dir, lang="tr", cb=None):
+def create_plan(prompt, out_dir, lang="tr", cb=None, length="orta"):
     """Araştırıp planı oluşturur, out_dir/plan.json olarak kaydeder ve döner."""
     global _cb
     _cb = cb or Callbacks()
     from .planner import make_plan
     os.makedirs(out_dir, exist_ok=True)
     _cb.stage(1, 5, "Araştırma ve senaryo")
-    plan = make_plan(prompt, lang, log)
+    plan = make_plan(prompt, lang, log, length)
     plan.setdefault("prompt", prompt)
     with open(os.path.join(out_dir, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, ensure_ascii=False, indent=2)
@@ -115,7 +115,7 @@ def create_plan(prompt, out_dir, lang="tr", cb=None):
 
 
 def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=False, lang="tr", cb=None,
-                preview_every=10):
+                preview_every=10, subtitles=False):
     """Planı videoya çevirir; video yolunu döner."""
     global _cb
     _cb = cb or Callbacks()
@@ -146,6 +146,7 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
             audio = tts.synthesize(sc["narration"], os.path.join(assets, f"voice_{i:02}.mp3"), lang, voice)
         sc["_audio"] = audio
         alen = tts.duration(audio) if audio else 0
+        sc["_speech"], sc["_subs"] = alen, subtitles
         sc["duration"] = max(float(sc.get("duration") or 0), MIN_DUR.get(sc["type"], 6), alen + 1.2)
         _cb.progress((i + 1) / len(sc_list))
 

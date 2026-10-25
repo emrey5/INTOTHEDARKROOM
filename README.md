@@ -22,7 +22,8 @@ Kurulumu denemek için: `DARKROOM.exe --selftest deneme` (2 sahnelik deneme vide
 
 Uygulamada:
 - **Konu** kutusuna videonun konusunu yazın ya da örneklerden birine tıklayın.
-- **Görünüm**: Çizgi film ya da Modern. Kartlardaki küçük resimler gerçek önizlemedir.
+- **Video süresi**: Kısa (~30 sn), Orta (~1 dk) ya da Uzun (~2 dk). Yapay zekâ sahne sayısını buna göre ayarlar.
+- **Altyazı**: "Videoya yaz" seçiliyse anlatım, konuşmayla eşzamanlı olarak alt şeritte görünür. Ayrı `altyazi.srt` dosyası her zaman oluşur.
 - **1 · Senaryoyu hazırla**: webde araştırır ve sahneleri yazar, sonra Senaryo sekmesi açılır.
 - **Senaryo** sekmesi: sahneleri ekleyin, silin, sıralayın; başlık, anlatım ve verileri düzeltin,
   "Önizle" ile anında görün.
@@ -35,7 +36,7 @@ Uygulamada:
 python -m promptvideo "Türkiye'nin nüfusu 1960'tan bugüne nasıl değişti?"
 ```
 
-Üç görünüm var: `--style mekanik` (siyah-turuncu, uygulamayla aynı tema), `--style cizgi` (varsayılan; kâğıt üstüne elle çizilmiş çizgi film tarzı,
+Uygulama her zaman siyah-turuncu `mekanik` görünümü kullanır. Komut satırında ayrıca `--style cizgi` (kâğıt üstüne elle çizilmiş çizgi film tarzı,
 titreyen çizgiler, doodle'lar, el yazısı notlar) ve `--style modern` (koyu, parlak, sinematik).
 
 Çıktı `cikti/` klasörüne yazılır: `video.mp4` (1920x1080, 30 fps), `plan.json` (senaryo), `altyazi.srt`.
@@ -72,6 +73,7 @@ python -m promptvideo "..." --music muzik.mp3        # arka plan müziği (telif
 python -m promptvideo "..." --plan-only               # sadece plan.json üret
 python -m promptvideo --plan cikti/plan.json          # planı elle düzeltip yeniden çiz
 python -m promptvideo --plan ornekler/demo_plan.json  # internetsiz demo
+python -m promptvideo "..." --length kisa --subtitles  # ~30 sn, altyazılı
 python -m promptvideo "..." --style modern          # koyu sinematik görünüm
 ```
 
@@ -93,7 +95,7 @@ kontrol edin, sonra `--plan` ile çizin. Planı elle yazmak da mümkün.
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama adresi |
 | `PV_VOICE` | `tr-TR-AhmetNeural` | Ses |
 | `PV_PRESET` / `PV_CRF` | `medium` / `19` | Kodlama hızı / kalitesi (düşük CRF = daha kaliteli, büyük dosya) |
-| `PV_STYLE` | `cizgi` | Varsayılan görünüm (`cizgi` / `modern`); `--style` ile de seçilir |
+| `PV_STYLE` | `mekanik` | Komut satırındaki varsayılan görünüm (`mekanik` / `cizgi` / `modern`); `--style` ile de seçilir |
 
 ## Sınırlar
 

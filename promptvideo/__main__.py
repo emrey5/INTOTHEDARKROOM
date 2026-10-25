@@ -19,7 +19,9 @@ def main(argv=None):
     ap.add_argument("--voice", help="edge-tts ses adı, ör. tr-TR-EmelNeural")
     ap.add_argument("--music", help="Arka plan müziği dosyası (mp3/wav)")
     ap.add_argument("--plan-only", action="store_true", help="Sadece planı oluştur, videoyu çizme")
-    ap.add_argument("--style", choices=["modern", "cizgi", "mekanik"], help="Görünüm: modern (koyu, sinematik) ya da cizgi (çizgi film)")
+    ap.add_argument("--style", choices=["modern", "cizgi", "mekanik"], help="Görünüm (varsayılan: mekanik)")
+    ap.add_argument("--length", choices=["kisa", "orta", "uzun"], default="orta", help="Video süresi")
+    ap.add_argument("--subtitles", action="store_true", help="Altyazıyı videonun üstüne yaz")
     ap.add_argument("--no-voice", action="store_true", help="Seslendirmeyi kapat")
     ap.add_argument("--gui", action="store_true", help="Masaüstü uygulamasını aç")
     a = ap.parse_args(argv)
@@ -30,10 +32,10 @@ def main(argv=None):
         with open(a.plan, encoding="utf-8") as f:
             plan = json.load(f)
     else:
-        plan = create_plan(a.prompt, a.out, a.lang)
+        plan = create_plan(a.prompt, a.out, a.lang, length=a.length)
         if a.plan_only:
             return
-    render_plan(plan, a.out, a.style, a.voice, a.music, a.no_voice, a.lang)
+    render_plan(plan, a.out, a.style, a.voice, a.music, a.no_voice, a.lang, subtitles=a.subtitles)
 
 
 if __name__ == "__main__":

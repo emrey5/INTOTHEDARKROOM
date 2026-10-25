@@ -35,11 +35,11 @@ SCHEMA = """
 }
 """
 
-SYSTEM = f"""Sen veri odaklı kısa belgesel videoları planlayan bir yapımcısın.
+SYSTEM_T = f"""Sen veri odaklı kısa belgesel videoları planlayan bir yapımcısın.
 Sana kullanıcının isteği ve webden toplanmış ARAŞTIRMA NOTLARI verilecek. Videoyu sahne sahne planla.
 
 Kurallar:
-- 6-10 sahne. İlk sahne "title", son sahne "outro" olsun.
+- {{n_scenes}} sahne. İlk sahne "title", son sahne "outro" olsun.
 - Her sahnenin "narration" alanı o sahnede seslendirilecek 1-3 doğal cümledir.
 - Grafik, tablo ve sayı sahnelerinde SADECE araştırma notlarındaki sayıları kullan ve "source" yaz.
   Notlarda olmayan sayı uydurma; veri yoksa "bullets", "image" veya "video" sahnesi kullan.
@@ -50,6 +50,13 @@ Kurallar:
 - Metinler kullanıcının dilinde (varsayılan Türkçe); image_query ve stock_query İngilizce.
 Yalnızca şu şemaya uyan JSON döndür:
 {SCHEMA}"""
+
+# Video süresi seçenekleri: sahne aralığı (yapay zekâ için) ve en fazla sahne (yedek planlayıcı için)
+LENGTHS = {"kisa": ("4-5", 5), "orta": ("6-9", 9), "uzun": ("10-14", 14)}
+
+
+def system_prompt(length="orta"):
+    return SYSTEM_T.replace("{n_scenes}", LENGTHS.get(length, LENGTHS["orta"])[0])
 
 
 def extract_json(text):
@@ -123,13 +130,13 @@ def research(prompt, lang="tr", log=print):
     return "\n\n".join(notes)[:24000], sources
 
 
-def plan_with_ollama(prompt, lang="tr", log=print):
+def plan_with_ollama(prompt, lang="tr", log=print, length="orta"):
     notes, sources = research(prompt, lang, log)
     log(f"  [ollama] {MODEL} senaryoyu yazıyor (birkaç dakika sürebilir)…")
     r = requests.post(f"{OLLAMA}/api/chat", timeout=1800, json={
         "model": MODEL, "stream": False, "format": "json", "think": False,
         "options": {"temperature": 0.4, "num_ctx": 16384},
-        "messages": [{"role": "system", "content": SYSTEM},
+        "messages": [{"role": "system", "content": system_prompt(length)},
                      {"role": "user", "content": f"İSTEK: {prompt}\n\nARAŞTIRMA NOTLARI:\n{notes}"}]})
     r.raise_for_status()
     plan = extract_json(r.json()["message"]["content"])
@@ -228,12 +235,12 @@ def _fmt(v, unit):
     return f"{s} {unit}".strip()
 
 
-def make_plan(prompt, lang="tr", log=print):
+def make_plan(prompt, lang="tr", log=print, length="orta"):
     ok, names = ollama_available()
     if ok:
         log(f"Yerel yapay zekâ ({MODEL}) ile araştırma + senaryo…")
         try:
-            plan = plan_with_ollama(prompt, lang, log)
+            plan = plan_with_ollama(prompt, lang, log, length)
             if plan.get("scenes"):
                 return plan
         except Exception as e:
@@ -241,4 +248,12 @@ def make_plan(prompt, lang="tr", log=print):
     else:
         log(f"Ollama'da {MODEL} bulunamadı (kurulu modeller: {names or 'yok'}). "
             f"Kural tabanlı planlayıcı kullanılıyor. Daha iyi senaryo için: ollama pull {MODEL}")
-    return plan_fallback(prompt, lang, log)
+    return trim_plan(plan_fallback(prompt, lang, log), length)
+
+
+def trim_plan(plan, length="orta"):
+    """Yedek planı seçilen süreye sığdırır: başlık ve kapanış kalır, aradakiler kısalır."""
+    sc, mx = plan["scenes"], LENGTHS.get(length, LENGTHS["orta"])[1]
+    if len(sc) > mx:
+        plan["scenes"] = sc[:mx - 1] + [sc[-1]]
+    return plan

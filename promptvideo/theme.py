@@ -63,7 +63,7 @@ def apply_style(name):
     FONTS = {k: os.path.join(FONT_DIR, v) for k, v in s["FONTS"].items()}
 
 
-apply_style(os.environ.get("PV_STYLE", "cizgi"))
+apply_style(os.environ.get("PV_STYLE", "mekanik"))
 
 
 def clamp(x, a=0.0, b=1.0):

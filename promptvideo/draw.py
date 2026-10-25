@@ -602,7 +602,50 @@ def footer_source(ctx, source, t):
     if not source:
         return
     a = clamp((t - 0.8) / 0.6) * 0.85
-    if th.SKETCH:
+    if SUBS:  # alt şeridi altyazı kullanıyor, kaynak sağ üste çıkar
+        draw_text(ctx, f"Kaynak: {source}", W - 60, 58, 22, mix(th.TEXT, th.BG, 0.4), alpha=a, align="right")
+    elif th.SKETCH:
         draw_text(ctx, f"Kaynak: {source}", 140, H - 60, 30, th.MUTED, alpha=a, kind="hand")
     else:
         draw_text(ctx, f"Kaynak: {source}", 140, H - 70, 22, mix(th.TEXT, th.BG, 0.4), alpha=a)
+
+
+# --- Altyazı -----------------------------------------------------------------
+
+SUBS = False  # bu karede altyazı çiziliyor mu (kaynak yazısının yeri buna göre değişir)
+
+def subtitle_chunks(text, size=42, max_w=1500, per=2):
+    """Anlatımı ekrana sığan, en fazla `per` satırlık parçalara böler."""
+    lines = wrap(text, size, max_w, "bold")
+    return [lines[i:i + per] for i in range(0, len(lines), per)]
+
+
+def subtitle(ctx, text, t, start, speech, size=42):
+    """Anlatımı konuşma süresine yayılmış parçalar halinde alt şeritte gösterir."""
+    chunks = subtitle_chunks(text, size)
+    if not chunks or speech <= 0:
+        return
+    total = sum(len(" ".join(c)) for c in chunks)
+    t0 = start
+    for c in chunks:
+        d = speech * len(" ".join(c)) / total
+        if t0 <= t < t0 + d:
+            break
+        t0 += d
+    else:
+        return
+    a = clamp(min((t - t0) / 0.15, (t0 + d - t) / 0.15))
+    if a <= 0:
+        return
+    lh = size * 1.3
+    w = max(text_width(l, size, "bold") for l in c) + 64
+    h = lh * len(c) + 30
+    x, y = (W - w) / 2, H - 36 - h
+    ctx.set_source_rgba(0.02, 0.02, 0.02, 0.88 * a)
+    round_rect(ctx, x, y, w, h, 6)
+    ctx.fill()
+    ctx.set_source_rgba(*th.ACCENT, a)
+    ctx.rectangle(x, y, 5, h)
+    ctx.fill()
+    for i, l in enumerate(c):
+        draw_text(ctx, l, W / 2, y + 15 + lh * i + size * 0.98, size, (0.96, 0.93, 0.88), a, "bold", "center")

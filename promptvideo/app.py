@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QLabel,
     QPlainTextEdit, QPushButton, QComboBox, QLineEdit, QFileDialog, QProgressBar, QTabWidget,
     QListWidget, QListWidgetItem, QFrame, QMessageBox, QSplitter, QSizePolicy, QCheckBox,
-    QFormLayout, QDoubleSpinBox, QToolButton, QScrollArea)
+    QFormLayout, QDoubleSpinBox, QToolButton, QScrollArea, QButtonGroup)
 
 from . import theme, pipeline, planner, scenes, updater, __version__
 from . import draw as D
@@ -106,10 +106,10 @@ QPushButton#danger { color: %(warn)s; border: 1px solid #4A1A08; border-left: 4p
 QPushButton#chip { font-family: 'Inter'; font-weight: 500; font-size: 12px; letter-spacing: 0; text-align: left;
     padding: 6px 10px; color: %(muted)s; background: %(field)s; border: 1px solid %(line)s; border-radius: 2px; }
 QPushButton#chip:hover { color: %(orange2)s; border-color: %(orange3)s; }
-QToolButton#stylecard { font-family: 'JetBrains Mono'; font-weight: 700; letter-spacing: 1px; color: %(muted)s;
-    background: %(field)s; border: 1px solid %(line2)s; border-radius: 3px; padding: 6px; }
-QToolButton#stylecard:hover { border-color: %(orange3)s; }
-QToolButton#stylecard:checked { color: %(orange)s; border: 2px solid %(orange)s; background: #120A03; }
+QToolButton#seg { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 11px; letter-spacing: 1px; color: %(muted)s;
+    background: %(field)s; border: 1px solid %(line2)s; border-radius: 2px; padding: 8px 4px; }
+QToolButton#seg:hover { color: %(orange2)s; border-color: %(orange3)s; }
+QToolButton#seg:checked { color: %(orange)s; border: 1px solid %(orange)s; border-bottom: 3px solid %(orange)s; background: #120A03; }
 
 QTabWidget::pane { border: none; }
 QTabBar::tab { font-family: 'JetBrains Mono'; background: transparent; color: %(muted)s; padding: 12px 20px;
@@ -239,12 +239,13 @@ class Worker(QThread):
         sys.stdout = Stream()
         try:
             if self.mode == "plan":
-                plan = pipeline.create_plan(self.prompt, self.out_dir, cb=cb)
+                plan = pipeline.create_plan(self.prompt, self.out_dir, cb=cb, length=self.opts.get("length", "orta"))
                 self.planned.emit(plan)
             else:
                 o = self.opts
                 out = pipeline.render_plan(self.plan, self.out_dir, o.get("style"), o.get("voice") or None,
-                                           o.get("music") or None, not o.get("voice"), cb=cb)
+                                           o.get("music") or None, not o.get("voice"), cb=cb,
+                                           subtitles=o.get("subtitles", False))
                 self.finished_ok.emit(out)
         except pipeline.Cancelled:
             self.failed.emit("İptal edildi.")
@@ -305,7 +306,7 @@ class MainWindow(QMainWindow):
         self.plan_dir = None
         self.worker = None
         self.last_video = None
-        self.style = self.settings.value("style", "cizgi")
+        self.style = "mekanik"  # uygulamada tek görünüm
 
         root = QWidget(objectName="root")
         self.setCentralWidget(root)
@@ -316,7 +317,6 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._build_main(), 1)
 
         self.check_ollama()
-        QTimer.singleShot(50, self.render_style_cards)
         QTimer.singleShot(1500, self.check_updates)
         self.refresh_library()
 
@@ -359,21 +359,12 @@ class MainWindow(QMainWindow):
             b.clicked.connect(lambda _=False, e=ex: self.prompt.setPlainText(e))
             v.addWidget(b)
 
-        v.addWidget(self._section("Görünüm"))
-        g = QHBoxLayout()
-        self.style_btns = {}
-        for key, label in (("cizgi", "ÇİZGİ"), ("modern", "MODERN"), ("mekanik", "MEKANİK")):
-            b = QToolButton(objectName="stylecard")
-            b.setText(label)
-            b.setCheckable(True)
-            b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-            b.setIconSize(QSize(92, 52))
-            b.setChecked(key == self.style)
-            b.clicked.connect(lambda _=False, k=key: self.set_style(k))
-            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-            self.style_btns[key] = b
-            g.addWidget(b)
-        v.addLayout(g)
+        v.addWidget(self._section("Video süresi"))
+        self.length = self._segmented([("kisa", "KISA\n~30 sn"), ("orta", "ORTA\n~1 dk"), ("uzun", "UZUN\n~2 dk")],
+                                      self.settings.value("length", "orta"), v)
+
+        v.addWidget(self._section("Altyazı"))
+        self.subs = self._segmented([("0", "YOK"), ("1", "VİDEOYA YAZ")], self.settings.value("subs", "1"), v)
 
         v.addWidget(self._section("Seslendirme"))
         self.voice = QComboBox()
@@ -673,20 +664,26 @@ class MainWindow(QMainWindow):
         return w
 
     # ---- ayarlar ve küçük yardımcılar ----
-    def set_style(self, key):
-        self.style = key
-        for k, b in self.style_btns.items():
-            b.setChecked(k == key)
-        self.settings.setValue("style", key)
-        self.load_scene(self.scene_list.currentRow())
-
-    def render_style_cards(self):
-        sample = {"type": "bar", "kicker": "Örnek", "title": "Şehir nüfusları",
-                  "data": [{"label": "İstanbul", "value": 15.7}, {"label": "Ankara", "value": 5.8},
-                           {"label": "İzmir", "value": 4.5}]}
-        for key, b in self.style_btns.items():
-            b.setIcon(QIcon(pil_to_pixmap(render_still(sample, key, 5, (300, 168)))))
-        theme.apply_style(self.style)
+    def _segmented(self, options, current, v):
+        """Yan yana, tek seçimli mekanik düğmeler. Seçili anahtarı .value() ile okunan bir nesne döner."""
+        g = QHBoxLayout()
+        g.setSpacing(6)
+        grp = QButtonGroup(self)
+        grp.setExclusive(True)
+        for key, label in options:
+            b = QToolButton(objectName="seg")
+            b.setText(label)
+            b.setCheckable(True)
+            b.setChecked(key == current)
+            b.setProperty("key", key)
+            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            grp.addButton(b)
+            g.addWidget(b)
+        if not grp.checkedButton():
+            grp.buttons()[0].setChecked(True)
+        grp.value = lambda: grp.checkedButton().property("key")
+        v.addLayout(g)
+        return grp
 
     def pick_music(self):
         p, _ = QFileDialog.getOpenFileName(self, "Müzik seç", "", "Ses (*.mp3 *.wav *.m4a *.ogg)")
@@ -749,6 +746,8 @@ class MainWindow(QMainWindow):
         s.setValue("music", self.music.text())
         s.setValue("outdir", self.outdir.text())
         s.setValue("model", self.model.currentText())
+        s.setValue("length", self.length.value())
+        s.setValue("subs", self.subs.value())
 
     # ---- iş akışı ----
     def start_plan(self):
@@ -762,7 +761,7 @@ class MainWindow(QMainWindow):
         self.plan_dir = os.path.join(self.outdir.text(), f"{stamp}-{slugify(prompt)}")
         self.log.clear()
         self.tabs.setCurrentIndex(0)
-        self.worker = Worker("plan", prompt=prompt, out_dir=self.plan_dir)
+        self.worker = Worker("plan", prompt=prompt, out_dir=self.plan_dir, opts={"length": self.length.value()})
         self._wire(self.worker)
         self.worker.planned.connect(self.on_planned)
         self.set_busy(True)
@@ -774,7 +773,8 @@ class MainWindow(QMainWindow):
         self.commit_scene_silently()
         self.save_settings()
         self.write_plan()
-        opts = {"style": self.style, "voice": self.voice.currentData(), "music": self.music.text().strip()}
+        opts = {"style": self.style, "voice": self.voice.currentData(), "music": self.music.text().strip(),
+                "subtitles": self.subs.value() == "1"}
         self.tabs.setCurrentIndex(0)
         self.worker = Worker("render", plan=self.plan, out_dir=self.plan_dir, opts=opts)
         self._wire(self.worker)

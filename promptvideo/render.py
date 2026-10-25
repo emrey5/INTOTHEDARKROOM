@@ -72,6 +72,7 @@ class VideoReader:
 def render_frame(ctx, sc, t, dur, gt, total_t, sidx, nscenes, video_surf=None):
     D.BOIL = int(gt * FPS) // BOIL_EVERY if th.SKETCH else 0
     D.background(ctx, gt)
+    D.SUBS = bool(sc.get("_subs") and sc.get("narration"))
     # ilk sahne yumuşak açılır, son sahne yumuşak kapanır; aradaki kesmeleri geçiş perdeleri örter
     a = 1.0
     if sidx == 0:
@@ -85,6 +86,8 @@ def render_frame(ctx, sc, t, dur, gt, total_t, sidx, nscenes, video_surf=None):
         DRAWERS.get(sc["type"], DRAWERS["bullets"])(ctx, sc, t, dur)
     ctx.pop_group_to_source()
     ctx.paint_with_alpha(a)
+    if D.SUBS:
+        D.subtitle(ctx, sc["narration"], t, 0.3, sc.get("_speech") or max(1.0, dur - 1.2))
     if sidx > 0 and t < TR:
         D.transition(ctx, D.TRANSITIONS[(sidx - 1) % len(D.TRANSITIONS)], 1 - t / TR, True, sidx - 1)
     if sidx < nscenes - 1 and t > dur - TR:
