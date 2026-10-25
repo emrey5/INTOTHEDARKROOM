@@ -14,7 +14,7 @@ import tempfile
 import time
 
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QRadialGradient, QLinearGradient
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QLinearGradient
 from PySide6.QtWidgets import QWidget, QApplication
 
 BG = QColor(6, 5, 5)
@@ -26,7 +26,12 @@ GRID = QColor(40, 34, 30)
 
 DURATION = 2.8
 WORD = "DARKROOM"
-LINES = ["› kapı kilidi açıldı", "› pozlama ayarlandı", "› animasyon motoru hazır"]
+STEPS = [(0.0, "Başlatılıyor…"), (0.3, "Yazı tipleri yükleniyor…"), (0.7, "Harita verisi yükleniyor…"),
+         (1.05, "Ses motoru hazırlanıyor…"), (1.35, "Animasyon motoru hazırlanıyor…"), (1.75, "Hazır")]
+M = 26                         # pencere kenarındaki gölge payı
+PANEL = 78                     # alttaki bilgi şeridinin yüksekliği
+ICON = 58
+ICON_PATH = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
 
 # zaman çizelgesi (saniye): ses de bu anlara göre üretilir
 T_BOLTS = (0.30, 0.36, 0.42)   # kapının sürgüleri çekilir
@@ -172,7 +177,8 @@ class Splash(QWidget):
     def __init__(self, version="", sound=True, clock=None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SplashScreen)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(820, 480)
+        self.setFixedSize(820 + 2 * M, 480 + 2 * M)
+        self.icon = QPixmap(ICON_PATH)
         self.version = version
         self.sound = sound
         self.clock = clock  # test için sabit zaman verilebilir
@@ -228,37 +234,44 @@ class Splash(QWidget):
         t = self.elapsed()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        w, h = self.width(), self.height()
-        p.setOpacity(_ease(_p(t, 0, 0.2)) * (1 - _ease_in_out(_p(t, DURATION - FADE, FADE))))
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        w, h = self.width() - 2 * M, self.height() - 2 * M
+        a = _ease(_p(t, 0, 0.25)) * (1 - _ease_in_out(_p(t, DURATION - FADE, FADE)))
+        p.setOpacity(a)
+        # yumuşak pencere gölgesi
+        for k in range(M, 0, -2):
+            c = QColor(0, 0, 0, int(70 * (1 - k / M) ** 2))
+            p.setPen(Qt.NoPen)
+            p.setBrush(c)
+            p.drawRoundedRect(QRectF(M - k, M - k + 6, w + 2 * k, h + 2 * k), 14 + k, 14 + k)
+        p.translate(M, M)
+        # pencere hafifçe büyüyerek açılır (uygulama açılışlarındaki gibi)
+        z = 0.96 + 0.04 * _ease(_p(t, 0, 0.35))
+        p.translate(w / 2, h / 2)
+        p.scale(z, z)
+        p.translate(-w / 2, -h / 2)
         p.setPen(QPen(QColor(60, 48, 40), 1))
         p.setBrush(BG)
-        p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), 14, 14)
+        p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), 12, 12)
         p.save()
         clip = QPainterPath()
-        clip.addRoundedRect(QRectF(1, 1, w - 2, h - 2), 14, 14)
+        clip.addRoundedRect(QRectF(1, 1, w - 2, h - 2), 12, 12)
         p.setClipPath(clip)
-        # kamera hafifçe sarsılır: kapı dayandığında ve son kilitlenmede
         shake = 0.0
-        for at, amp in ((T_LOCK, 1.5),):  # yalnızca kilitlenmede çok hafif
-            d = t - at
-            if 0 <= d < 0.35:
-                shake += amp * math.exp(-d * 12) * math.sin(d * 90)
+        d = t - T_LOCK
+        if 0 <= d < 0.35:  # kilitlenmede çok hafif
+            shake = 1.5 * math.exp(-d * 12) * math.sin(d * 90)
         p.translate(0, shake)
         self._room(p, t, w, h)
         self._door(p, t, w, h)
         self._letters(p, t, w, h)
         p.translate(0, -shake)
-        self._hud(p, t, w, h)
+        self._panel(p, t, w, h)
         p.restore()
-        p.setPen(QPen(ORANGE, 3))
-        k = 22 * _ease(_p(t, 0.1, 0.4))
-        for x, y, dx, dy in ((14, 14, 1, 1), (w - 14, 14, -1, 1), (14, h - 14, 1, -1), (w - 14, h - 14, -1, -1)):
-            p.drawLine(QPointF(x, y), QPointF(x + dx * k, y))
-            p.drawLine(QPointF(x, y), QPointF(x, y + dy * k))
         p.end()
 
     def _vp(self, w, h):
-        return w / 2, h / 2 - 10
+        return w / 2, (h - PANEL) / 2
 
     def _approach(self, t):
         """Kapıya yaklaşma: 0 (uzakta) → 1 (kapının eşiği) → üstü (kapıdan geçtik)."""
@@ -368,7 +381,7 @@ class Splash(QWidget):
             x = (rect.left() if side < 0 else rect.center().x()) + off
             panel = QRectF(x, rect.top(), half, dh)
             p.save()
-            p.setClipRect(rect)
+            p.setClipRect(rect, Qt.IntersectClip)
             gr = QLinearGradient(panel.left(), 0, panel.right(), 0)
             gr.setColorAt(0, QColor(26, 23, 21))
             gr.setColorAt(1, QColor(38, 34, 31))
@@ -380,7 +393,7 @@ class Splash(QWidget):
             # birleşim kenarında uyarı şeridi
             ew = 7 * sc
             ex = panel.right() - ew if side < 0 else panel.left()
-            p.setClipRect(QRectF(ex, panel.top(), ew, dh).intersected(rect))
+            p.setClipRect(QRectF(ex, panel.top(), ew, dh).intersected(rect), Qt.IntersectClip)
             p.fillRect(QRectF(ex, panel.top(), ew, dh), QColor(20, 18, 16))
             p.setPen(Qt.NoPen)
             p.setBrush(ORANGE)
@@ -422,7 +435,8 @@ class Splash(QWidget):
         fm = p.fontMetrics()
         cw = fm.horizontalAdvance("M") + 10
         total = cw * len(WORD) - 10
-        x0, y0 = w / 2 - total / 2, h / 2 + 4
+        shift = (ICON + 22) / 2  # simge + yazı birlikte ortalanır
+        x0, y0 = w / 2 - total / 2 + shift, (h - PANEL) / 2 + 18
         fl = _lamp(t)
         for i, ch in enumerate(WORD):
             st = T_LETTER + i * LETTER_GAP
@@ -464,9 +478,20 @@ class Splash(QWidget):
             p.setPen(col)
             p.drawText(QPointF(-fm.horizontalAdvance(ch) / 2, 0), ch)
             p.restore()
+        # uygulama simgesi: harfler tamamlanınca yanına yerleşir
+        ic = _p(t, T_LOCK - 0.1, 0.35)
+        if ic > 0 and not self.icon.isNull():
+            q = 1 + 2.4 * (ic - 1) ** 3 + 1.4 * (ic - 1) ** 2  # hafif yaylanma
+            p.save()
+            p.setOpacity(p.opacity() * min(1.0, ic * 2))
+            cx, cy = x0 - 22 - ICON / 2, y0 - 17
+            p.translate(cx, cy)
+            p.scale(q, q)
+            p.drawPixmap(QRectF(-ICON / 2, -ICON / 2, ICON, ICON), self.icon, QRectF(self.icon.rect()))
+            p.restore()
         lk = _ease(_p(t, T_LOCK, 0.3))
         if lk > 0:
-            p.fillRect(QRectF(w / 2 - total / 2 * lk, y0 + 18, total * lk, 4), ORANGE)
+            p.fillRect(QRectF(x0, y0 + 18, total * lk, 3), ORANGE)
         sub = "credit by EC"
         sa = _ease(_p(t, T_LOCK + 0.05, 0.35))
         if sa > 0:
@@ -475,23 +500,40 @@ class Splash(QWidget):
             c.setAlphaF(sa)
             p.setPen(c)
             fm2 = p.fontMetrics()
-            p.drawText(QPointF(w / 2 - fm2.horizontalAdvance(sub) / 2, y0 + 50 + (1 - sa) * 8), sub)
+            p.drawText(QPointF(x0 + total - fm2.horizontalAdvance(sub), y0 + 46 + (1 - sa) * 8), sub)
 
-    def _hud(self, p, t, w, h):
-        p.setFont(QFont("JetBrains Mono", 10))
-        y0 = h - 92
-        for i, (ln, at) in enumerate(zip(LINES, (T_BOLTS[-1] + 0.1, T_LAMP + 0.3, T_LOCK))):
-            if t < at:
-                continue
-            p.setPen(MUTED)
-            p.drawText(QPointF(40, y0 + i * 18), ln)
-            if t > at + 0.2:
-                p.setPen(ORANGE)
-                p.drawText(QPointF(290, y0 + i * 18), "[ OK ]")
-        pr = _ease(_p(t, 0.1, T_LOCK))
-        bx, by, bw = 40, h - 26, w - 80
-        p.fillRect(QRectF(bx, by, bw, 3), GRID)
-        p.fillRect(QRectF(bx, by, bw * pr, 3), ORANGE)
+    def _panel(self, p, t, w, h):
+        """Alttaki bilgi şeridi: ürün adı ve sürüm, yükleme durumu, ilerleme çubuğu, telif satırı."""
+        top = h - PANEL
+        g = QLinearGradient(0, top, 0, h)
+        g.setColorAt(0, QColor(14, 12, 11, 235))
+        g.setColorAt(1, QColor(9, 8, 7, 250))
+        p.fillRect(QRectF(0, top, w, PANEL), g)
+        p.fillRect(QRectF(0, top, w, 1), QColor(60, 48, 40))
+        pr = _ease(_p(t, 0.05, T_LOCK + 0.1))
+        p.fillRect(QRectF(0, top, w * pr, 2), ORANGE)
+        x = 28
+        f = QFont("JetBrains Mono", 12)
+        f.setWeight(QFont.ExtraBold)
+        f.setLetterSpacing(QFont.AbsoluteSpacing, 2)
+        p.setFont(f)
+        p.setPen(TEXT)
+        p.drawText(QPointF(x, top + 32), "DARK")
+        fm = p.fontMetrics()
+        p.setPen(ORANGE)
+        p.drawText(QPointF(x + fm.horizontalAdvance("DARK"), top + 32), "ROOM")
+        p.setFont(QFont("Inter", 10))
+        p.setPen(MUTED)
         if self.version:
-            p.setPen(MUTED)
-            p.drawText(QRectF(bx, by - 22, bw, 18), Qt.AlignRight | Qt.AlignVCenter, f"v{self.version}")
+            p.drawText(QPointF(x + fm.horizontalAdvance("DARKROOM") + 14, top + 31), f"Sürüm {self.version}")
+        # yükleme durumu: aşamalar sırayla değişir, yeni yazı yumuşakça gelir
+        cur = [s for s in STEPS if t >= s[0]][-1]
+        fade = _ease(_p(t, cur[0], 0.15))
+        c = QColor(MUTED if cur[1] != "Hazır" else ORANGE)
+        c.setAlphaF(fade)
+        p.setPen(c)
+        p.drawText(QPointF(x, top + 56 + (1 - fade) * 4), cur[1])
+        p.setPen(MUTED)
+        p.drawText(QRectF(w / 2, top + 18, w / 2 - 28, 18), Qt.AlignRight | Qt.AlignVCenter, "© 2026 DARKROOM")
+        p.drawText(QRectF(w / 2, top + 42, w / 2 - 28, 18), Qt.AlignRight | Qt.AlignVCenter,
+                   f"{int(pr * 100)}%")
