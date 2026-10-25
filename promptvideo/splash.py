@@ -23,18 +23,19 @@ TEXT = QColor(242, 236, 228)
 MUTED = QColor(140, 130, 119)
 GRID = QColor(40, 34, 30)
 
-DURATION = 4.0
+DURATION = 2.6
 WORD = "DARKROOM"
 LINES = ["› kapı kilidi açıldı", "› karanlık oda lambası yandı", "› animasyon motoru hazır"]
 
 # zaman çizelgesi (saniye): ses de bu anlara göre üretilir
-T_BOLTS = (0.30, 0.42, 0.54)   # sürgüler çekilir
-T_DOOR = (0.65, 0.75)          # kapı açılmaya başlar, süre
-T_LAMP = 1.45                  # karanlık oda lambası yanar
-T_LETTER = 1.65                # ilk harf yola çıkar
-LETTER_GAP = 0.12
-LETTER_FLY = 0.5
-T_LOCK = T_LETTER + (len(WORD) - 1) * LETTER_GAP + LETTER_FLY + 0.08  # son, ağır kilitlenme
+T_BOLTS = (0.10, 0.16, 0.22)   # sürgüler çekilir
+T_DOOR = (0.28, 0.5)           # kapı açılmaya başlar, süre
+T_LAMP = 0.55                  # karanlık oda lambası yanar
+T_LETTER = 0.7                 # ilk harf yola çıkar
+LETTER_GAP = 0.06
+LETTER_FLY = 0.42
+T_LOCK = T_LETTER + (len(WORD) - 1) * LETTER_GAP + LETTER_FLY + 0.04  # son kilitlenme
+FADE = 0.45                    # sonda ana pencereye yumuşak geçiş
 
 
 def _p(t, start, dur):
@@ -54,22 +55,22 @@ def _lamp(t):
     if t < T_LAMP:
         return 0.0
     d = t - T_LAMP
-    if d < 0.35:
-        return (0.9, 0.1, 0.7, 0.0, 1.0, 0.3, 1.0)[int(d / 0.05)]
-    return 0.92 + 0.08 * math.sin(t * 37) * math.sin(t * 13)
+    rise = _ease_in_out(min(1.0, d / 0.35))
+    dip = 0.35 * math.exp(-((d - 0.12) / 0.04) ** 2)  # tek, yumuşak bir titreme
+    return max(0.0, rise - dip) * (0.95 + 0.05 * math.sin(t * 9))
 
 
 def _sound_path():
     """Mekanik ve karanlık ses: sürgü tıkları, kapı motoru ve hidrolik tıslama, lamba şalteri ve vızıltısı,
     her harfte pres darbesi, sonda ağır çelik kilitlenme; altta uyumsuz derin bir uğultu."""
-    path = os.path.join(tempfile.gettempdir(), "darkroom_acilis_v5.wav")
+    path = os.path.join(tempfile.gettempdir(), "darkroom_acilis_v6.wav")
     if os.path.exists(path):
         return path
     import numpy as np
     from . import audio as A
     sr = A.SR
     rng = np.random.default_rng(17)
-    total = DURATION + 0.6
+    total = DURATION + 0.4
     out = np.zeros(int(total * sr))
 
     def tt(d):
@@ -93,9 +94,10 @@ def _sound_path():
     def clack(f=2400, body=1.0, d=0.12):
         """Çelik sürgü / röle: sert tık + kısa metal tını + gövde."""
         t = tt(d)
-        click = hp(rng.standard_normal(len(t))) * np.exp(-t / 0.002) * 1.4
+        click = lp(rng.standard_normal(len(t)), 3) * np.exp(-t / 0.002) * 0.6
         ring = sum(np.sin(2 * np.pi * f * m * t) * a for m, a in ((1, 0.5), (1.53, 0.35), (2.7, 0.2)))
-        ring *= np.exp(-t / 0.018)
+        ring *= np.exp(-t / 0.012) * 0.6
+        body = body * 0.8
         thump = np.sin(2 * np.pi * np.cumsum(180 * np.exp(-t * 30) + 60) / sr) * np.exp(-t / 0.03) * body
         return click + ring + thump
 
@@ -105,9 +107,9 @@ def _sound_path():
         modes = ((1.0, 1.0, 0.6), (1.07, 0.7, 0.55), (2.76, 0.45, 0.3), (4.13, 0.3, 0.16), (6.9, 0.2, 0.08))
         x = sum(a * np.sin(2 * np.pi * f0 * m * t + rng.random() * 6) * np.exp(-t / (dc * ring))
                 for m, a, dc in modes)
-        hit = lp(rng.standard_normal(len(t)), 3) * np.exp(-t / 0.012) * 1.2
+        hit = lp(rng.standard_normal(len(t)), 8) * np.exp(-t / 0.012) * 0.5
         sub = np.sin(2 * np.pi * np.cumsum(85 * np.exp(-t * 6) + 30) / sr) * np.exp(-t / (0.3 * ring))
-        return np.tanh((x * 0.6 + hit + sub * 1.3) * 1.6)
+        return np.tanh((x * 0.45 + hit + sub * 1.3) * 1.2) * np.minimum(1, t / 0.006)
 
     # alttaki karanlık uğultu: sürten iki bas, sona doğru kabarır
     t = tt(total)
@@ -116,30 +118,34 @@ def _sound_path():
     put(0, drone, 0.16)
     # sürgüler
     for k, s in enumerate(T_BOLTS):
-        put(s, clack(2100 + k * 180, 1.0), 0.75)
+        put(s, clack(1600 + k * 140, 1.0), 0.4)
     # kapı motoru: kaba testere dalga + dişli titreşimi, hidrolik tıslama
     d = T_DOOR[1] + 0.1
     t = tt(d)
     f = 55 + 40 * np.sin(np.minimum(1, t / d) * np.pi)
     motor = np.tanh(lp(saw(f, t), 4) * 2) * (1 + 0.5 * np.sign(np.sin(2 * np.pi * 22 * t)))
     motor *= np.minimum(1, t / 0.05) * np.clip((d - t) / 0.08, 0, 1)
-    put(T_DOOR[0], motor, 0.2)
+    put(T_DOOR[0], lp(motor, 8), 0.12)
     ht = tt(0.6)
-    put(T_DOOR[0], hp(rng.standard_normal(len(ht)), 3) * np.exp(-ht / 0.18) * np.minimum(1, ht / 0.02), 0.22)
-    put(T_DOOR[0] + T_DOOR[1], slam(150, 0.45), 0.6)  # kapı dayanır
+    put(T_DOOR[0], hp(rng.standard_normal(len(ht)), 3) * np.exp(-ht / 0.18) * np.minimum(1, ht / 0.08), 0.12)
+    put(T_DOOR[0] + T_DOOR[1], slam(150, 0.3), 0.3)  # kapı dayanır
     # lamba şalteri ve vızıltısı (titreşimle birlikte)
-    put(T_LAMP - 0.03, clack(1500, 1.4, 0.15), 0.8)
+    put(T_LAMP - 0.03, clack(1300, 1.2, 0.15), 0.35)
     t = tt(total - T_LAMP)
     buzz = lp(np.sign(np.sin(2 * np.pi * 100 * t)) + 0.4 * np.sign(np.sin(2 * np.pi * 150 * t)), 5)
     level = np.array([_lamp(T_LAMP + x) for x in t[::441]])
     buzz *= np.repeat(level, 441)[: len(buzz)] * np.clip((total - T_LAMP - t) / 0.8, 0, 1)
-    put(T_LAMP, buzz, 0.05)
+    put(T_LAMP, buzz, 0.025)
     # her harf yerine çakılırken pres darbesi
     for i in range(len(WORD)):
-        put(T_LETTER + i * LETTER_GAP + LETTER_FLY, clack(900 + (i % 3) * 70, 1.6, 0.18), 0.55)
+        put(T_LETTER + i * LETTER_GAP + LETTER_FLY, clack(900 + (i % 3) * 70, 1.4, 0.15), 0.28)
     # son ağır kilitlenme
-    put(T_LOCK, slam(110, 1.4), 1.0)
-    put(T_LOCK, clack(1800, 2.0, 0.2), 0.6)
+    put(T_LOCK, slam(110, 0.9), 0.8)
+    put(T_LOCK, clack(1400, 1.8, 0.2), 0.3)
+    fo = int(0.6 * sr)  # pencere geçişiyle birlikte ses de yumuşakça söner
+    end = int((DURATION + 0.3) * sr)
+    out[end - fo:end] *= np.linspace(1, 0, fo)
+    out[end:] = 0
     peak = np.max(np.abs(out)) or 1
     A._write(path, np.tanh(out / peak * 1.5) * 0.9)
     return path
@@ -178,6 +184,7 @@ class Splash(QWidget):
         self.timer = QTimer(self, interval=16)
         self.timer.timeout.connect(self._tick)
         self._done = False
+        self._handed = False
         rnd = random.Random(3)
         self.dust = [(rnd.uniform(-1, 1), rnd.uniform(-1, 1), rnd.uniform(0.2, 1)) for _ in range(70)]
         scr = QApplication.primaryScreen()
@@ -201,7 +208,11 @@ class Splash(QWidget):
         self._finish()
 
     def _tick(self):
-        if self.elapsed() >= DURATION:
+        t = self.elapsed()
+        if t >= DURATION - FADE and not self._handed:
+            self._handed = True
+            self.finished.emit()  # ana pencere, açılış solarken belirmeye başlar
+        if t >= DURATION:
             self._finish()
         else:
             self.update()
@@ -212,7 +223,9 @@ class Splash(QWidget):
         self._done = True
         self.timer.stop()
         self.close()
-        self.finished.emit()
+        if not self._handed:
+            self._handed = True
+            self.finished.emit()
 
     # ---- çizim ----
     def paintEvent(self, _):
@@ -220,7 +233,7 @@ class Splash(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        p.setOpacity(_ease(_p(t, 0, 0.25)) * (1 - _p(t, DURATION - 0.3, 0.3)))
+        p.setOpacity(_ease(_p(t, 0, 0.2)) * (1 - _ease_in_out(_p(t, DURATION - FADE, FADE))))
         p.setPen(QPen(QColor(60, 48, 40), 1))
         p.setBrush(BG)
         p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), 14, 14)
@@ -230,7 +243,7 @@ class Splash(QWidget):
         p.setClipPath(clip)
         # kamera hafifçe sarsılır: kapı dayandığında ve son kilitlenmede
         shake = 0.0
-        for at, amp in ((T_DOOR[0] + T_DOOR[1], 4), (T_LOCK, 7)):
+        for at, amp in ((T_LOCK, 1.5),):  # yalnızca kilitlenmede çok hafif
             d = t - at
             if 0 <= d < 0.35:
                 shake += amp * math.exp(-d * 12) * math.sin(d * 90)
@@ -321,22 +334,23 @@ class Splash(QWidget):
             q = _p(t, st, LETTER_FLY)
             if q <= 0:
                 continue
-            e = q ** 2.2  # uzaktan yavaş, yaklaştıkça hızlı: derinlik hissi
+            e = _ease_in_out(q) ** 1.4  # derinlik hissi, ama yumuşak duruş
             fx, fy = x0 + i * cw + cw / 2, y0
             x, y = vx + (fx - vx) * e, vy + (fy - vy) * e
             sc = 0.06 + 0.94 * e
             base = TEXT if i < 4 else ORANGE
             dark = 0.15 + 0.85 * e
             col = QColor(int(base.red() * dark), int(base.green() * dark), int(base.blue() * dark))
+            col.setAlphaF(min(1.0, q * 2.5))  # karanlıktan yavaşça belirir
             p.save()
             p.translate(x, y)
             p.scale(sc, sc)
             # çakıldığı an kısa bir parlama
-            flash = 1 - _p(t, st + LETTER_FLY, 0.18)
+            flash = 1 - _ease(_p(t, st + LETTER_FLY, 0.3))
             if q >= 1 and flash > 0:
                 g = QRadialGradient(QPointF(0, -18), 60)
                 c = QColor(ORANGE)
-                c.setAlphaF(0.6 * flash)
+                c.setAlphaF(0.3 * flash)
                 g.setColorAt(0, c)
                 c2 = QColor(ORANGE)
                 c2.setAlphaF(0)
@@ -354,12 +368,14 @@ class Splash(QWidget):
         if lk > 0:
             p.fillRect(QRectF(w / 2 - total / 2 * lk, y0 + 18, total * lk, 4), ORANGE)
         sub = "// PROMPT → VIDEO · veri destekli animasyon motoru"
-        n = int(len(sub) * _p(t, T_LOCK + 0.1, 0.5))
-        if n:
+        sa = _ease(_p(t, T_LOCK + 0.05, 0.35))
+        if sa > 0:
             p.setFont(QFont("JetBrains Mono", 11))
-            p.setPen(MUTED)
+            c = QColor(MUTED)
+            c.setAlphaF(sa)
+            p.setPen(c)
             fm2 = p.fontMetrics()
-            p.drawText(QPointF(w / 2 - fm2.horizontalAdvance(sub) / 2, y0 + 50), sub[:n])
+            p.drawText(QPointF(w / 2 - fm2.horizontalAdvance(sub) / 2, y0 + 50 + (1 - sa) * 8), sub)
 
     def _door(self, p, t, w, h):
         """Perçinli, uyarı şeritli iki kanatlı çelik kapı; sürgüler çekilir, kanatlar yana kayar."""

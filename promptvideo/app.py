@@ -1269,7 +1269,18 @@ def run_app():
     sp.start()
     app.processEvents()
     w = MainWindow()  # açılış efekti oynarken ana pencere arkada hazırlanır
-    sp.finished.connect(w.show)
+    def reveal():  # ana pencere açılış solarken yumuşakça belirir
+        from PySide6.QtCore import QPropertyAnimation, QEasingCurve
+        w.setWindowOpacity(0.0)
+        w.show()
+        w._fade = QPropertyAnimation(w, b"windowOpacity")
+        w._fade.setDuration(450)
+        w._fade.setStartValue(0.0)
+        w._fade.setEndValue(1.0)
+        w._fade.setEasingCurve(QEasingCurve.InOutCubic)
+        w._fade.start()
+
+    sp.finished.connect(reveal)
     return app.exec()
 
 
