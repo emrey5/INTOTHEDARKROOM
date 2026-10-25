@@ -132,7 +132,9 @@ def install(progress, log, cancelled=lambda: False):
 
 
 def pull(model, progress, cancelled=lambda: False):
-    """Modeli indirir; ilerlemeyi katman katman bildirir."""
+    """Modeli indirir. Ollama modeli birkaç parça (katman) halinde indirir; ilerleme tek bir çubukta,
+    bütün parçaların toplamı olarak bildirilir (parça parça baştan başlayan çubuk ayrı modeller sanılıyordu)."""
+    parts = {}  # parça kimliği -> (toplam, inen)
     with requests.post(f"{planner.OLLAMA}/api/pull", json={"model": model, "stream": True},
                        stream=True, timeout=(10, 600)) as r:
         r.raise_for_status()
@@ -145,10 +147,17 @@ def pull(model, progress, cancelled=lambda: False):
             if d.get("error"):
                 raise RuntimeError(d["error"])
             tot, comp = d.get("total"), d.get("completed")
-            if tot and comp:
-                progress(comp / tot, f"{model} indiriliyor… {comp / 2 ** 30:.1f} / {tot / 2 ** 30:.1f} GB")
+            if tot:
+                parts[d.get("digest") or d.get("status")] = (tot, comp or 0)
+                T = sum(t for t, _ in parts.values())
+                C = sum(c for _, c in parts.values())
+                progress(C / T, f"{model} indiriliyor… {C / 2 ** 30:.1f} / {T / 2 ** 30:.1f} GB")
+            elif d.get("status") == "success":
+                progress(1.0, f"{model} hazır")
+            elif d.get("status") and not parts:
+                progress(None, f"{model}: hazırlanıyor…")
             elif d.get("status"):
-                progress(None, f"{model}: {d['status']}")
+                progress(1.0, f"{model}: doğrulanıyor…")
             if d.get("status") == "success":
                 return True
     return has_model(model)
