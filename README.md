@@ -23,7 +23,10 @@ Kurulumu denemek için: `DARKROOM.exe --selftest deneme` (2 sahnelik deneme vide
 **Basit mod (açılışta):** tek kutuya nasıl bir video istediğini yaz, **▶ VİDEOYU YAP**'a bas. Program
 yazdığından stili, müziği, tempoyu, süreyi, formatı (Shorts, Instagram), dili, sesi ve rengi kendisi seçer,
 seçtiklerini kutunun altında gösterir; araştırma, senaryo ve video kendiliğinden art arda yapılır.
-Örnekler: "Shorts için kısa bir video: Kahvenin dünyaya yayılış hikâyesi", "Osmanlı İmparatorluğu'nun
+Programın sorduğu tek şey **video türü**: Gerçekçi (gerçek görüntüler), Çizgi animasyon, İnfografik,
+Haber bülteni, Kinetik yazı (büyük hareketli yazılar), Karakter anlatıyor, Retro piksel (8-bit oyun görünümü
+ve müziği). Tür senaryonun yapısını ve görünümü belirler; promptta "çizgi film", "retro" gibi bir tür
+geçiyorsa kendiliğinden seçilir. Örnekler: "Shorts için kısa bir video: Kahvenin dünyaya yayılış hikâyesi", "Osmanlı İmparatorluğu'nun
 yükselişi, detaylı, 4K", "Çözülemeyen cinayetler, kadın sesiyle". Her şeyi elle seçmek ya da senaryoyu
 düzenlemek için sağ üstteki **⚙ Gelişmiş mod**.
 

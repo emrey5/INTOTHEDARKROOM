@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from . import theme, pipeline, planner, scenes, updater, userdata, __version__
 from .waitscreen import WaitScreen
-from . import ollama_setup, autoset
+from . import ollama_setup, autoset, kinds
 from . import draw as D
 from .render import render_frame
 
@@ -33,11 +33,11 @@ SCENE_TYPES = {
     "line": "Çizgi grafik", "pie": "Pasta grafik", "table": "Tablo", "image": "Görsel",
     "video": "Video klip", "character": "Karakter konuşur", "versus": "Karşılaştırma (VS)",
     "people": "İnsan piktogramı", "map": "Harita", "timeline": "Zaman çizelgesi",
-    "compare": "Önce / sonra", "outro": "Kapanış",
+    "compare": "Önce / sonra", "kinetic": "Kinetik yazı", "outro": "Kapanış",
 }
 SCENE_ICONS = {"title": "✦", "bullets": "☰", "stat": "#", "bar": "▤", "line": "📈", "pie": "◔",
                "table": "▦", "image": "🖼", "video": "🎬", "character": "☺", "versus": "⚔",
-               "people": "☷", "map": "🗺", "timeline": "⏱", "compare": "⇄", "outro": "★"}
+               "people": "☷", "map": "🗺", "timeline": "⏱", "compare": "⇄", "kinetic": "Aa", "outro": "★"}
 VOICES_BY_LANG = {
     "tr": [("Ahmet (erkek)", "tr-TR-AhmetNeural"), ("Emel (kadın)", "tr-TR-EmelNeural"), ("Sessiz", "")],
     "en": [("Andrew (erkek)", "en-US-AndrewNeural"), ("Ava (kadın)", "en-US-AvaNeural"),
@@ -46,7 +46,8 @@ VOICES_BY_LANG = {
 VOICES = VOICES_BY_LANG["tr"]
 MUSIC_MODES = [("Yok", ""), ("Otomatik · Sakin", "auto:sakin"), ("Otomatik · Enerjik", "auto:enerjik"),
                ("Otomatik · Gizemli", "auto:gizemli"), ("Otomatik · Epik", "auto:epik"),
-               ("Otomatik · Gerilim", "auto:gerilim"), ("Kendi dosyam…", "file")]
+               ("Otomatik · Gerilim", "auto:gerilim"), ("Otomatik · Retro (8-bit)", "auto:retro"),
+               ("Kendi dosyam…", "file")]
 # videodaki vurgu ve arka plan renkleri ("" = stilin kendi rengi)
 ACCENT_SWATCHES = [("", "Stilin rengi"), ("#FF7A1A", "Turuncu"), ("#3D8BFF", "Mavi"), ("#2ED47A", "Yeşil"),
                    ("#9B6BFF", "Mor"), ("#FF3B4E", "Kırmızı"), ("#E0B04A", "Altın"), ("#FF5CA8", "Pembe"),
@@ -109,6 +110,7 @@ SAMPLE_SCENES = {
                             {"year": "2000", "text": "Üçüncü olay"}]},
     "compare": {"type": "compare", "kicker": "Önce / sonra", "title": "Başlık", "unit": "",
                 "before": {"label": "2000", "value": 10, "text": ""}, "after": {"label": "2024", "value": 25, "text": ""}},
+    "kinetic": {"type": "kinetic", "kicker": "Biliyor muydunuz?", "narration": "Kahve 15. yüzyılda Yemen'de içilmeye başlandı."},
     "outro": {"type": "outro", "title": "İzlediğiniz için teşekkürler", "sources": []},
 }
 COMMON_KEYS = ("type", "kicker", "title", "narration", "duration", "accent")
@@ -490,7 +492,7 @@ class Worker(QThread):
                 self.researched.emit(pipeline.research_topic(self.prompt, self.out_dir, self.opts.get("lang", "tr"), cb=cb))
             elif self.mode == "plan":
                 plan = pipeline.write_plan(self.prompt, self.findings, self.out_dir, self.opts.get("lang", "tr"), cb=cb,
-                                           length=self.opts.get("length", "orta"))
+                                           length=self.opts.get("length", "orta"), kind=self.opts.get("kind"))
                 self.planned.emit(plan)
             else:
                 o = self.opts
@@ -828,6 +830,14 @@ class MainWindow(QMainWindow):
         col.addStretch(1)
         row.addLayout(col)
         v.addLayout(row)
+        kl = QHBoxLayout()
+        kl.addWidget(QLabel("VİDEO TÜRÜ", objectName="formlabel"))
+        v.addLayout(kl)
+        self.kind_sel = self._segmented([(k, d["label"]) for k, d in kinds.KINDS.items()], kinds.DEFAULT, v)
+        for b in self.kind_sel.buttons():
+            b.setToolTip(kinds.KINDS[b.property("key")]["desc"])
+        self._kind_locked = False
+        self.kind_sel.buttonClicked.connect(self._on_kind_clicked)
         ex = QHBoxLayout()
         for e in ("Shorts için kısa bir video: Kahvenin dünyaya yayılış hikâyesi",
                   "Osmanlı İmparatorluğu'nun yükselişi, detaylı",
@@ -845,6 +855,10 @@ class MainWindow(QMainWindow):
         self._auto_timer.setSingleShot(True)
         self._auto_timer.timeout.connect(self.update_auto_info)
         return self.simple_panel
+
+    def _on_kind_clicked(self, *_):
+        self._kind_locked = True  # kullanıcı seçti: prompt artık türü değiştirmez
+        self.update_auto_info()
 
     def set_simple(self, on):
         self.simple = on
@@ -867,7 +881,9 @@ class MainWindow(QMainWindow):
         if not text:
             self.auto_info.setText("Program yazdığına göre stili, müziği, süreyi ve formatı kendisi seçer.")
             return
-        _, why, topic = autoset.infer(text)
+        if not self._kind_locked:
+            self.kind_sel.set_value(kinds.detect(text) or kinds.DEFAULT)
+        _, why, topic = autoset.infer(text, self.kind_sel.value())
         self.auto_info.setText(f"KONU ▸ {topic}\nSEÇİLENLER ▸ " + "  ·  ".join(why))
 
     def start_auto(self):
@@ -877,7 +893,7 @@ class MainWindow(QMainWindow):
             return
         if self.busy():
             return
-        opts, why, topic = autoset.infer(text)
+        opts, why, topic = autoset.infer(text, self.kind_sel.value())
         self.set_options(opts)
         self.prompt.setPlainText(topic)
         self.findings, self.plan = None, None
@@ -1070,6 +1086,18 @@ class MainWindow(QMainWindow):
         cols.addLayout(left, 1)
         cols.addLayout(right, 1)
         self._style_ctrls = []
+
+        v = self._group("Video türü", left)
+        self.kind_combo = QComboBox()
+        for k, d in kinds.KINDS.items():
+            self.kind_combo.addItem(f"{d['name']}  ·  {d['desc']}", k)
+        self.kind_combo.setCurrentIndex(max(0, self.kind_combo.findData(kinds.DEFAULT)))
+        self.kind_combo.activated.connect(self.on_kind_combo)
+        v.addWidget(self.kind_combo)
+        hint = QLabel("Tür senaryonun yapısını belirler (ör. kinetik yazıda anlatım büyük yazıya dönüşür). "
+                      "Seçince görünüm ve müzik de türe uygun hale gelir.", objectName="hint")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
 
         v = self._group("Görünüm", left)
         self.style_combo = QComboBox()
@@ -1434,11 +1462,11 @@ class MainWindow(QMainWindow):
         return grp
 
     # ---- video seçenekleri: hazır stiller, profiller ----
-    OPTION_KEYS = ("style", "accent", "bg", "quality", "fps", "tempo", "vertical", "square", "subs", "sub_size",
+    OPTION_KEYS = ("kind", "style", "accent", "bg", "quality", "fps", "tempo", "vertical", "square", "subs", "sub_size",
                    "sub_pos", "sub_box", "voice", "music_mode", "music", "music_vol", "sfx", "length", "lang")
 
     def get_options(self):
-        return {"style": self.style_combo.currentData(), "accent": self.accent_row.value(), "bg": self.bg_row.value(),
+        return {"kind": self.kind_combo.currentData(), "style": self.style_combo.currentData(), "accent": self.accent_row.value(), "bg": self.bg_row.value(),
                 "quality": self.quality.value(), "fps": self.fps.value(), "tempo": self.tempo.value(),
                 "vertical": self.vert.value(), "square": self.square.value(), "subs": self.subs.value(),
                 "sub_size": self.sub_size.value(), "sub_pos": self.sub_pos.value(), "sub_box": self.sub_box.value(),
@@ -1453,6 +1481,10 @@ class MainWindow(QMainWindow):
             if "lang" in o:
                 self.lang.set_value(o["lang"])
                 self.fill_voices()
+            if "kind" in o:
+                self.kind_combo.setCurrentIndex(max(0, self.kind_combo.findData(o["kind"])))
+                if hasattr(self, "kind_sel"):
+                    self.kind_sel.set_value(o["kind"])
             if "style" in o:
                 self.style_combo.setCurrentIndex(max(0, self.style_combo.findData(o["style"])))
             if "accent" in o:
@@ -1502,6 +1534,15 @@ class MainWindow(QMainWindow):
         i = self.voice.findData(cur)
         self.voice.setCurrentIndex(i if i >= 0 else 0)
         self.voice.blockSignals(False)
+
+    def on_kind_combo(self, *_):
+        kd = kinds.KINDS[self.kind_combo.currentData()]
+        o = {"kind": self.kind_combo.currentData()}
+        if kd.get("style"):
+            o["style"] = kd["style"]
+        if kd.get("music"):
+            o["music_mode"] = kd["music"]
+        self.set_options(o)
 
     def look(self):
         """Videonun görünümü: (stil, vurgu, arka plan)."""
@@ -1800,7 +1841,8 @@ class MainWindow(QMainWindow):
         self.log.clear()
         self.tabs.setCurrentWidget(self.tab_preview)
         self.worker = Worker("plan", prompt=prompt, out_dir=self.plan_dir, findings=self.findings,
-                             opts={"length": self.length.value(), "lang": self.lang.value()})
+                             opts={"length": self.length.value(), "lang": self.lang.value(),
+                                   "kind": self.kind_combo.currentData()})
         self._wire(self.worker)
         self.worker.planned.connect(self.on_planned)
         self.set_busy(True)

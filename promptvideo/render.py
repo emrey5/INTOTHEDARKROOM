@@ -99,6 +99,38 @@ def render_frame(ctx, sc, t, dur, gt, total_t, sidx, nscenes, video_surf=None):
     if sidx < nscenes - 1 and t > dur - TR:
         D.transition(ctx, D.TRANSITIONS[sidx % len(D.TRANSITIONS)], (t - (dur - TR)) / TR, False, sidx)
     progress_bar(ctx, gt / max(total_t, 0.01))
+    if th.PIXEL:
+        pixelate(ctx.get_target())
+
+
+# 8-bit palet (PICO-8): her piksel en yakın renge indirgenir
+_PAL = None
+_BAYER = None
+
+
+def pixelate(surf, px=None):
+    """Kareyi iri piksellere ve sınırlı palete indirger (retro oyun görünümü)."""
+    import numpy as np
+    global _PAL, _BAYER
+    if _PAL is None:
+        cols = ["000000", "1D2B53", "7E2553", "008751", "AB5236", "5F574F", "C2C3C7", "FFF1E8", "FF004D",
+                "FFA300", "FFEC27", "00E436", "29ADFF", "83769C", "FF77A8", "FFCCAA", "1D1430", "2B1B4A"]
+        _PAL = np.array([[int(c[i:i + 2], 16) for i in (4, 2, 0)] for c in cols], np.int32)  # BGR sırası
+        _BAYER = (np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]) / 16 - 0.5) * 24
+    surf.flush()
+    w, h = surf.get_width(), surf.get_height()
+    stride = surf.get_stride()
+    k = px or max(2, int(round(4 * w / W)))  # 1080p'de 4 piksel = 480x270 "ekran"
+    buf = np.ndarray((h, stride // 4, 4), np.uint8, surf.get_data())
+    a = buf[:h - h % k, :w - w % k, :3].astype(np.int32)
+    sh, sw = a.shape[0] // k, a.shape[1] // k
+    small = a.reshape(sh, k, sw, k, 3).mean(axis=(1, 3))
+    small += _BAYER[np.arange(sh)[:, None] % 4, np.arange(sw)[None, :] % 4][..., None]  # düzenli titreşim (dither)
+    d = ((small[:, :, None, :] - _PAL[None, None, :, :]) ** 2).sum(-1)
+    q = _PAL[d.argmin(-1)].astype(np.uint8)
+    big = np.repeat(np.repeat(q, k, axis=0), k, axis=1)
+    buf[:big.shape[0], :big.shape[1], :3] = big
+    surf.mark_dirty()
 
 
 def progress_bar(ctx, p):

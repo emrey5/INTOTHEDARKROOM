@@ -1119,9 +1119,89 @@ def draw_compare(ctx, sc, t, dur):
     D.footer_source(ctx, sc.get("source"), t)
 
 
+# --- Kinetik yazı ----------------------------------------------------------
+
+def kinetic_phrases(text, max_chars=16):
+    """Metni ekrana tek tek gelecek 1-3 kelimelik parçalara böler."""
+    words, out, cur = str(text).split(), [], []
+    for w in words:
+        if cur and (len(" ".join(cur + [w])) > max_chars or len(cur) >= 3):
+            out.append(cur)
+            cur = []
+        cur.append(w)
+        if w[-1:] in ".!?:;":
+            out.append(cur)
+            cur = []
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _hot(word):
+    """Vurgulanacak kelime: sayı içeriyor ya da uzun bir kelime."""
+    w = word.strip(".,;:!?\"'()")
+    return any(ch.isdigit() for ch in w) or len(w) >= 9
+
+
+def draw_kinetic(ctx, sc, t, dur):
+    """Büyük, tek tek beliren kelime grupları; sayılar ve önemli kelimeler vurgu renginde."""
+    text = sc.get("text") or sc.get("narration") or sc.get("title", "")
+    phrases = kinetic_phrases(text)
+    if not phrases:
+        return
+    if sc.get("kicker"):
+        p = ease_out_cubic(prog(t, 0.0, 0.5))
+        D.draw_text(ctx, sc["kicker"].upper(), W / 2, 150 - (1 - p) * 20, 30, th.ACCENT, p, "bold", "center")
+    speech = sc.get("_speech") or max(1.0, dur - 1.0)
+    total = sum(len(" ".join(ph)) + 4 for ph in phrases)
+    starts, acc = [], 0.25
+    for ph in phrases:
+        starts.append(acc)
+        acc += speech * (len(" ".join(ph)) + 4) / total
+    k = max(i for i, s0 in enumerate(starts) if t >= s0) if t >= starts[0] else -1
+    cy = H / 2 + 40
+    for idx in (k - 1, k):
+        if idx < 0:
+            continue
+        ph = phrases[idx]
+        p = prog(t, starts[idx], 0.28)
+        if idx == k - 1:  # bir önceki parça yukarı kayıp söner
+            q = prog(t, starts[k], 0.28)
+            alpha, dy, sc_k = 1 - q, -150 * ease_out_cubic(q), 1 - 0.15 * q
+            if alpha <= 0:
+                continue
+        else:
+            alpha, dy, sc_k = clamp(p * 2), 60 * (1 - ease_out_cubic(p)), lerp(1.25, 1.0, ease_out_back(p))
+        size = 150
+        line = " ".join(ph)
+        while D.text_width(line, size, "display") > W - 260 and size > 70:
+            size -= 8
+        gap = size * 0.28
+        widths = [D.text_width(w, size, "display") for w in ph]
+        x = -(sum(widths) + gap * (len(ph) - 1)) / 2
+        ctx.save()
+        ctx.translate(W / 2, cy + dy)
+        ctx.scale(sc_k, sc_k)
+        for w, ww in zip(ph, widths):
+            hot = _hot(w)
+            if hot and not th.SKETCH:
+                ctx.set_source_rgba(*th.ACCENT, 0.18 * alpha)
+                D.round_rect(ctx, x - 14, -size * 0.82, ww + 28, size * 1.02, 12)
+                ctx.fill()
+            D.draw_text(ctx, w, x, 0, size, th.ACCENT if hot else (th.INK if th.SKETCH else th.TEXT), alpha,
+                        "display", outline=(1, 1, 1) if th.SKETCH else None, shadow=(6, 6) if th.SKETCH else None)
+            x += ww + gap
+        ctx.restore()
+    # alttaki ilerleme çizgisi: konuşmanın neresindeyiz
+    pr = clamp((t - 0.25) / speech)
+    ctx.set_source_rgba(*th.ACCENT, 0.9)
+    D.round_rect(ctx, W / 2 - 160, cy + 140, 320 * pr, 6, 3)
+    ctx.fill()
+
+
 DRAWERS = {
     "title": draw_title, "bullets": draw_bullets, "stat": draw_stat, "bar": draw_bar,
     "line": draw_line, "pie": draw_pie, "table": draw_table, "image": draw_image,
     "outro": draw_outro, "character": draw_character_scene, "versus": draw_versus, "people": draw_people,
-    "map": draw_map, "timeline": draw_timeline, "compare": draw_compare,
+    "map": draw_map, "timeline": draw_timeline, "compare": draw_compare, "kinetic": draw_kinetic,
 }

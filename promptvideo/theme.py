@@ -77,6 +77,15 @@ STYLES = {
         FONTS=dict(body="Inter-Regular.ttf", bold="Inter-SemiBold.ttf", display="Inter-ExtraBold.ttf",
                    hand="Inter-SemiBold.ttf"),
     ),
+    # Retro piksel: 8-bit oyun görünümü (kareler sonradan iri piksellere ve sınırlı palete indirgenir)
+    "piksel": dict(
+        SKETCH=False, PIXEL=True,
+        BG="#1D1430", BG2="#2B1B4A", TEXT="#FFF1E8", MUTED="#C2C3C7", GRID="#3B2A5E",
+        INK="#FFF1E8", ACCENT="#FF004D", ACCENT2="#FFA300", HILITE="#FF004D",
+        PALETTE=["#FF004D", "#FFA300", "#FFEC27", "#00E436", "#29ADFF", "#FF77A8", "#83769C", "#FFCCAA"],
+        FONTS=dict(body="JetBrainsMono-Bold.ttf", bold="JetBrainsMono-ExtraBold.ttf",
+                   display="JetBrainsMono-ExtraBold.ttf", hand="JetBrainsMono-Bold.ttf"),
+    ),
     # Kâğıt üstüne elle çizilmiş çizgi film / doodle görünümü
     "cizgi": dict(
         SKETCH=True,
@@ -89,10 +98,11 @@ STYLES = {
 }
 
 STYLE_NAMES = {"mekanik": "DARKROOM (siyah-turuncu)", "modern": "Modern (mor-mavi)", "belgesel": "Belgesel",
-               "haber": "Haber", "minimal": "Minimal (açık)", "cizgi": "Çizgi film"}
+               "haber": "Haber", "minimal": "Minimal (açık)", "cizgi": "Çizgi film",
+               "piksel": "Retro piksel (8-bit)"}
 
 STYLE = "modern"
-SKETCH = LIGHT = False
+SKETCH = LIGHT = PIXEL = False
 BG = BG2 = TEXT = MUTED = GRID = INK = ACCENT = ACCENT2 = HILITE = GLASS = (0, 0, 0)
 PALETTE = []
 FONTS = {}
@@ -102,7 +112,7 @@ _OPTS = {}
 def apply_style(name, accent=None, bg=None):
     """Stili uygular. accent / bg: "#RRGGBB" ile stilin vurgu ve arka plan rengini değiştirir.
     Verilmezse bir önceki apply_style çağrısındaki renk seçimi korunur (accent="" ile sıfırlanır)."""
-    global STYLE, SKETCH, LIGHT, BG, BG2, TEXT, MUTED, GRID, INK, ACCENT, ACCENT2, HILITE, GLASS, PALETTE, FONTS
+    global STYLE, SKETCH, LIGHT, PIXEL, BG, BG2, TEXT, MUTED, GRID, INK, ACCENT, ACCENT2, HILITE, GLASS, PALETTE, FONTS
     name = name if name in STYLES else "mekanik"
     if accent is not None:
         _OPTS["accent"] = accent
@@ -111,6 +121,7 @@ def apply_style(name, accent=None, bg=None):
     s = STYLES[name]
     STYLE = name
     SKETCH = s["SKETCH"]
+    PIXEL = s.get("PIXEL", False)
     BG, BG2, TEXT, MUTED, GRID, INK, ACCENT, ACCENT2, HILITE = (
         hex2rgb(s[k]) for k in ("BG", "BG2", "TEXT", "MUTED", "GRID", "INK", "ACCENT", "ACCENT2", "HILITE"))
     PALETTE = [hex2rgb(c) for c in s["PALETTE"]]

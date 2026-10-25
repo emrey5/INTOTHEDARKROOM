@@ -6,7 +6,7 @@ uygun görünüm ve müzik seçilir. İnternetsiz ve anında çalışır.
 """
 import re
 
-DEFAULTS = dict(style="mekanik", accent="", bg="", quality="1080", fps="30", tempo="normal", vertical="0",
+DEFAULTS = dict(kind="infografik", style="mekanik", accent="", bg="", quality="1080", fps="30", tempo="normal", vertical="0",
                 square="0", subs="1", sub_size="orta", sub_pos="alt", sub_box="kutu", voice="tr-TR-AhmetNeural",
                 music_mode="auto:sakin", music_vol=35, sfx="1", length="orta", lang="tr")
 
@@ -59,8 +59,10 @@ def _has(text, words):
     return next((w for w in words if w in text), None)
 
 
-def infer(prompt):
-    """Prompttan ayarlar. Dönüş: (ayarlar, neden seçildiklerinin kısa listesi, araştırılacak konu)."""
+def infer(prompt, kind=None):
+    """Prompttan ayarlar. kind verilirse (kullanıcı seçtiyse) video türü odur, yoksa prompttan bulunur.
+    Dönüş: (ayarlar, neden seçildiklerinin kısa listesi, araştırılacak konu)."""
+    from . import kinds as K
     raw = prompt or ""
     t = " " + raw.lower().replace("i̇", "i") + " "
     o = dict(DEFAULTS)
@@ -86,7 +88,19 @@ def infer(prompt):
             why.append(f"konu: {TOPIC_NAMES[name]}")
             break
 
-    # açık stil isteği her şeyi ezer
+    # video türü: görünümü ve senaryonun yapısını belirler
+    kind = kind or K.detect(t) or K.DEFAULT
+    o["kind"] = kind
+    kd = K.KINDS[kind]
+    if kd.get("style"):
+        o["style"] = kd["style"]
+    if kd.get("music"):
+        o["music_mode"] = kd["music"]
+    for w in K.WORDS.get(kind, ()):
+        if w in t:
+            cut.append(re.escape(w.strip()) + r"\w*")
+
+    # açık stil isteği görünümü ezer
     for st, words in STYLE_WORDS.items():
         w = _has(t, words)
         if w:
@@ -173,9 +187,11 @@ def infer(prompt):
         cut.append(re.escape(m.group(0)))
 
     from .theme import STYLE_NAMES
-    why.insert(0, STYLE_NAMES.get(o["style"], o["style"]).split(" (")[0])
+    if o["style"] != kd.get("style"):
+        why.insert(0, STYLE_NAMES.get(o["style"], o["style"]).split(" (")[0] + " görünüm")
+    why.insert(0, K.KINDS[kind]["name"])
     mus = {"": "müziksiz", "auto:sakin": "sakin müzik", "auto:enerjik": "enerjik müzik", "auto:gizemli": "gizemli müzik",
-           "auto:epik": "epik müzik", "auto:gerilim": "gerilim müziği"}.get(o["music_mode"], "")
+           "auto:epik": "epik müzik", "auto:gerilim": "gerilim müziği", "auto:retro": "8-bit müzik"}.get(o["music_mode"], "")
     if mus:
         why.append(mus)
     if o["tempo"] != "normal":

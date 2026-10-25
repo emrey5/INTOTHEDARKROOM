@@ -9,7 +9,7 @@ import wave
 import numpy as np
 
 SR = 44100
-MOODS = {"enerjik": "Enerjik", "sakin": "Sakin", "gizemli": "Gizemli", "epik": "Epik", "gerilim": "Gerilim"}
+MOODS = {"enerjik": "Enerjik", "sakin": "Sakin", "gizemli": "Gizemli", "epik": "Epik", "gerilim": "Gerilim", "retro": "Retro (8-bit)"}
 
 
 def _t(dur):
@@ -154,12 +154,19 @@ PROGS = {  # akor dizileri (MIDI notaları), tempo, davul yoğunluğu
     "gizemli": ([[50, 53, 57], [46, 50, 53], [43, 46, 50], [45, 49, 52]], 76, 0),
     "epik": ([[57, 60, 64], [53, 57, 60], [60, 64, 67], [55, 59, 62]], 96, 2),
     "gerilim": ([[45, 48, 52], [46, 49, 53], [45, 48, 52], [44, 47, 51]], 100, 1),
+    "retro": ([[60, 64, 67], [57, 60, 64], [53, 57, 60], [55, 59, 62]], 124, 2),
 }
+
+
+def _sq(ph):
+    """Kare dalga (8-bit oyun sesi), hafif yumuşatılmış."""
+    return np.tanh(np.sin(ph) * 6) * 0.8
 
 
 def build_music(mood, total, path, seed=3):
     """Video süresi kadar telifsiz müzik üretir (WAV)."""
     chords, bpm, drums = PROGS.get(mood, PROGS["sakin"])
+    osc = _sq if mood == "retro" else np.sin
     rng = np.random.default_rng(seed)
     beat = 60.0 / bpm
     bar = beat * 4
@@ -190,14 +197,14 @@ def build_music(mood, total, path, seed=3):
         for note in ch:
             f = _midi(note)
             for det in (-0.12, 0.0, 0.12):
-                p += np.sin(2 * np.pi * f * (1 + det / 100) * tb + rng.random() * 6) * 0.06
+                p += osc(2 * np.pi * f * (1 + det / 100) * tb + rng.random() * 6) * (0.025 if mood == "retro" else 0.06)
                 p += np.sin(2 * np.pi * 2 * f * tb) * 0.012
         pad[seg] += (p * bar_env)[:m]
         # bas
         fb = _midi(ch[0] - 12)
-        bs = np.sin(2 * np.pi * fb * tb) * 0.22 * _env(len(tb), 0.01, beat * 1.5)
+        bs = osc(2 * np.pi * fb * tb) * 0.22 * _env(len(tb), 0.01, beat * 1.5)
         if drums == 2:
-            bs = np.concatenate([np.sin(2 * np.pi * fb * _t(beat)) * 0.2 * _env(int(beat * SR), 0.005, beat * 0.5)] * 4)
+            bs = np.concatenate([osc(2 * np.pi * fb * _t(beat)) * 0.2 * _env(int(beat * SR), 0.005, beat * 0.5)] * 4)
             bs = np.pad(bs, (0, max(0, len(tb) - len(bs))))[: len(tb)]
         bass[seg] += bs[:m]
         # arpej (sekizlikler)
@@ -208,8 +215,8 @@ def build_music(mood, total, path, seed=3):
                 j0 = i0 + k * pl
                 if j0 >= n:
                     break
-                tone = (np.sin(2 * np.pi * f * tp) + 0.25 * np.sin(2 * np.pi * 3 * f * tp)) * 0.07
-                tone *= _env(pl, 0.003, step * (0.5 if mood == "enerjik" else 0.9))
+                tone = (osc(2 * np.pi * f * tp) + 0.25 * np.sin(2 * np.pi * 3 * f * tp)) * 0.07
+                tone *= _env(pl, 0.003, step * (0.5 if mood in ("enerjik", "retro") else 0.9))
                 arp[j0:j0 + pl] += tone[: max(0, min(pl, n - j0))]
         # davul
         for k in range(4):

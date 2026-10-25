@@ -15,7 +15,7 @@ from .render import render_scene, concat
 
 MIN_DUR = {"title": 5, "bullets": 7, "stat": 5, "bar": 7, "line": 8, "pie": 7, "table": 7,
            "image": 5, "video": 5, "outro": 5, "character": 5, "versus": 7, "people": 7, "map": 8,
-           "timeline": 9, "compare": 7}
+           "timeline": 9, "compare": 7, "kinetic": 4}
 
 
 # tempo: seslendirme hızı, sahne sonundaki nefes payı (sn), en kısa süre çarpanı
@@ -131,7 +131,7 @@ def load_findings(out_dir):
     return None
 
 
-def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta"):
+def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta", kind=None):
     """Seçili bulgulardan senaryoyu yazar, sayıları doğrular, out_dir/plan.json olarak kaydeder."""
     global _cb
     _cb = cb or Callbacks()
@@ -139,7 +139,7 @@ def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta"):
     from .factcheck import check_plan
     os.makedirs(out_dir, exist_ok=True)
     _cb.stage(1, 5, "Senaryo yazılıyor")
-    plan = make_plan(prompt, lang, log, length, findings)
+    plan = make_plan(prompt, lang, log, length, findings, kind)
     plan.setdefault("prompt", prompt)
     chk = check_plan(plan, findings)
     if chk:
@@ -153,10 +153,10 @@ def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta"):
     return plan
 
 
-def create_plan(prompt, out_dir, lang="tr", cb=None, length="orta"):
+def create_plan(prompt, out_dir, lang="tr", cb=None, length="orta", kind=None):
     """Araştırma + senaryo tek adımda (komut satırı için)."""
     findings = research_topic(prompt, out_dir, lang, cb)
-    return write_plan(prompt, findings, out_dir, lang, cb, length)
+    return write_plan(prompt, findings, out_dir, lang, cb, length, kind)
 
 
 def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=False, lang="tr", cb=None,
