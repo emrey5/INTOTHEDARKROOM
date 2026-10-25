@@ -39,16 +39,17 @@ def _back(x, s=1.8):
 
 
 def _sound_path():
-    """Metal dövme sesi: örs üstünde çekiç vuruşları (her vuruştan sonra küçük sekme tıkı),
-    en sonda en ağır vuruş ve suya batırılan kızgın demirin tıslaması."""
-    path = os.path.join(tempfile.gettempdir(), "darkroom_acilis_v3.wav")
+    """Korkutucu açılış: uyumsuz derin uğultu, paslı metal gıcırtısı, karanlık metal darbeler,
+    geri sarılmış nefes gibi yükselen ses ve logo kilitlenirken ağır, bozuk bir "BRAAM" darbesi."""
+    path = os.path.join(tempfile.gettempdir(), "darkroom_acilis_v4.wav")
     if os.path.exists(path):
         return path
     import numpy as np
     from . import audio as A
     sr = A.SR
-    rng = np.random.default_rng(11)
-    out = np.zeros(int(3.6 * sr))
+    rng = np.random.default_rng(13)
+    total = 4.0
+    out = np.zeros(int(total * sr))
 
     def tt(d):
         return np.arange(int(d * sr)) / sr
@@ -58,40 +59,72 @@ def _sound_path():
         j = min(len(out), i + len(clip))
         out[i:j] += clip[: j - i] * gain
 
-    def hp(x, k=2):
-        return x - np.convolve(x, np.ones(k) / k, mode="same")
+    def lp(x, k):
+        return np.convolve(x, np.ones(k) / k, mode="same")
 
-    def strike(f0=1050, ring=1.0, weight=1.0):
-        """Örs vuruşu: çelik çubuğun uyumsuz titreşim kipleri + çekiç darbesi + gövde gümbürtüsü."""
-        t = tt(0.4 + 1.6 * ring)
-        modes = ((1.0, 1.0, 0.9), (2.76, 0.55, 0.45), (5.40, 0.35, 0.22), (8.93, 0.22, 0.12), (1.5, 0.25, 0.6))
-        x = sum(a * np.sin(2 * np.pi * f0 * m * (1 + rng.uniform(-0.003, 0.003)) * t + rng.random() * 6)
-                * np.exp(-t / (dcy * ring)) for m, a, dcy in modes)
-        # hafif vuruntu (iki yakın frekans) metale canlılık verir
-        x *= 1 + 0.12 * np.sin(2 * np.pi * 5.5 * t)
-        hit = hp(rng.standard_normal(len(t))) * np.exp(-t / 0.0025) * 1.6
-        body = np.sin(2 * np.pi * np.cumsum(160 * np.exp(-t * 20) + 70) / sr) * np.exp(-t / 0.05) * weight
-        return (x * 0.55 + hit + body * 0.8) * np.minimum(1, t / 0.0008)
+    def saw(f, t):
+        ph = np.cumsum(np.broadcast_to(f, t.shape)) / sr
+        return 2 * (ph % 1) - 1
 
-    def tap(f0):
-        """Çekicin örsten sekmesi: kısa, ince bir tın."""
-        return strike(f0 * 1.04, ring=0.18, weight=0.1) * 0.35
+    # 1) uyumsuz derin uğultu: birbirine sürten iki bas ve bir triton, yavaşça kabarır
+    t = tt(total)
+    drone = (np.sin(2 * np.pi * 41 * t) + np.sin(2 * np.pi * 43.6 * t) * 0.9
+             + np.sin(2 * np.pi * 58 * t) * 0.5 + lp(saw(41, t), 30) * 0.4)
+    swell = np.clip(t / 1.6, 0, 1) ** 2
+    drone *= (0.25 + 0.75 * swell) * np.clip((total - t) / 1.2, 0, 1)
+    put(0, drone, 0.22)
 
-    # ritim: VURUŞ ... tık, görüntüdeki anlarla eşleşir (diyafram, harfler, kilitlenme)
-    for sec, f0, g in ((0.08, 980, 0.75), (0.52, 1010, 0.8), (0.98, 1040, 0.85)):
-        put(sec, strike(f0, ring=0.8), g)
-        put(sec + 0.13, tap(f0), 1.0)
-        put(sec + 0.21, tap(f0) * 0.5, 1.0)
-    # son ve en ağır vuruş: uzun çınlama
-    put(1.60, strike(900, ring=1.5, weight=1.6), 1.0)
-    put(1.60, strike(1350, ring=1.0, weight=0.0), 0.35)  # ikinci tını: daha zengin metal
-    # kızgın demir suya: tıslama
-    ht = tt(1.3)
-    hiss = hp(rng.standard_normal(len(ht)), 3)
-    hiss *= np.minimum(1, ht / 0.04) * np.exp(-ht / 0.45) * (1 + 0.3 * rng.standard_normal(len(ht)) * 0.2)
-    put(2.0, hiss, 0.12)
+    # 2) paslı metal gıcırtısı: yapışıp kayan (stick-slip) darbeler, rezonanslı metal gövde
+    d = 1.15
+    clip = np.zeros(int(d * sr))
+    k = 0.0
+    while k < d:
+        f = 700 + 500 * np.sin(k / d * np.pi) + rng.uniform(-80, 80)
+        n = int(0.02 * sr)
+        tn = np.arange(n) / sr
+        g = np.sin(2 * np.pi * f * tn) + 0.5 * np.sin(2 * np.pi * f * 2.13 * tn)
+        g *= np.exp(-tn / 0.006)
+        i = int(k * sr)
+        j = min(len(clip), i + n)
+        clip[i:j] += g[: j - i] * rng.uniform(0.6, 1.0)
+        k += 1 / rng.uniform(28, 75)
+    clip *= np.sin(np.linspace(0, np.pi, len(clip))) ** 0.5
+    put(0.25, clip, 0.28)
+
+    # 3) karanlık metal darbe: alçak, uyumsuz tınılar + gövde
+    def dark_hit(f0=150, ring=1.0, weight=1.0):
+        t = tt(0.3 + 1.8 * ring)
+        modes = ((1.0, 1.0, 0.8), (1.07, 0.7, 0.7), (2.76, 0.5, 0.35), (4.13, 0.3, 0.2), (6.9, 0.2, 0.1))
+        x = sum(a * np.sin(2 * np.pi * f0 * m * t + rng.random() * 6) * np.exp(-t / (dc * ring))
+                for m, a, dc in modes)
+        hit = lp(rng.standard_normal(len(t)), 3) * np.exp(-t / 0.01)
+        sub = np.sin(2 * np.pi * np.cumsum(90 * np.exp(-t * 6) + 32) / sr) * np.exp(-t / (0.25 * ring)) * weight
+        return np.tanh((x * 0.6 + hit + sub * 1.2) * 1.5)
+
+    put(0.06, dark_hit(140, 0.7, 0.8), 0.55)
+    put(0.95, dark_hit(132, 0.7, 0.9), 0.6)
+
+    # 4) tersine nefes: gürültü yükselip aniden kesilir, son darbeye çeker
+    rt = tt(0.9)
+    breath = lp(rng.standard_normal(len(rt)), 6) * (rt / rt[-1]) ** 3
+    put(0.70, breath, 0.35)
+
+    # 5) BRAAM: bozuk, kalın bas akor (küçük ikili sürtünme) + düşen sub + karanlık metal
+    t = tt(2.4)
+    env = np.minimum(1, t / 0.015) * np.exp(-t / 0.9)
+    chord = sum(lp(saw(f * (1 + 0.004 * np.sin(2 * np.pi * 0.7 * t + i)), t), 8) * a
+                for i, (f, a) in enumerate(((55, 1.0), (58.3, 0.8), (82.4, 0.6), (110, 0.5), (116.5, 0.35))))
+    braam = np.tanh(chord * 2.5) * env
+    sub = np.sin(2 * np.pi * np.cumsum(70 * np.exp(-t * 2.5) + 28) / sr) * np.exp(-t / 1.1)
+    put(1.60, braam, 0.6)
+    put(1.60, sub, 0.7)
+    put(1.60, dark_hit(110, 1.4, 0.5), 0.5)
+    # uzaktan gelen alçak gürleme kuyruğu
+    tail = lp(rng.standard_normal(int(2.2 * sr)), 60)
+    put(1.70, tail * np.exp(-np.arange(len(tail)) / sr / 0.8) * 4, 0.3)
+
     peak = np.max(np.abs(out)) or 1
-    A._write(path, np.tanh(out / peak * 1.3) * 0.88)
+    A._write(path, np.tanh(out / peak * 1.6) * 0.9)
     return path
 
 
