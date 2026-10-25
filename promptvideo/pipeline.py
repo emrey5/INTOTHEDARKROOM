@@ -154,7 +154,7 @@ def create_plan(prompt, out_dir, lang="tr", cb=None, length="orta"):
 
 
 def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=False, lang="tr", cb=None,
-                preview_every=10, subtitles=False, sfx=True):
+                preview_every=10, subtitles=False, sfx=True, vertical=False):
     """Planı videoya çevirir; video yolunu döner.
     music: ses dosyası yolu ya da "auto:enerjik" / "auto:sakin" / "auto:gizemli" (program üretir)."""
     global _cb
@@ -230,6 +230,16 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
     concat(parts, out, music, sfx_path)
     with open(os.path.join(out_dir, "altyazi.srt"), "w", encoding="utf-8") as f:
         f.write("\n".join(srt))
+    from . import publish
+    try:
+        publish.thumbnail(plan, sc_list, os.path.join(out_dir, "kapak.png"))
+        publish.youtube_text(plan, sc_list, os.path.join(out_dir, "youtube.txt"))
+        log("Kapak resmi (kapak.png) ve YouTube metinleri (youtube.txt) hazır.")
+    except Exception as e:
+        log(f"  [yayın paketi] {e}")
+    if vertical:
+        log("Dikey (Shorts) sürüm hazırlanıyor…")
+        publish.vertical(out, os.path.join(out_dir, "video_dikey.mp4"), plan.get("title", ""))
     for p in parts:
         try:
             os.remove(p)

@@ -19,6 +19,7 @@ def main(argv=None):
     ap.add_argument("--voice", help="edge-tts ses adı, ör. tr-TR-EmelNeural")
     ap.add_argument("--music", help="Arka plan müziği: dosya yolu ya da auto:sakin / auto:enerjik / auto:gizemli")
     ap.add_argument("--no-sfx", action="store_true", help="Ses efektlerini kapat")
+    ap.add_argument("--vertical", action="store_true", help="Ayrıca 9:16 dikey (Shorts) sürüm üret")
     ap.add_argument("--plan-only", action="store_true", help="Sadece planı oluştur, videoyu çizme")
     ap.add_argument("--style", choices=["modern", "cizgi", "mekanik"], help="Görünüm (varsayılan: mekanik)")
     ap.add_argument("--length", choices=["kisa", "orta", "uzun"], default="orta", help="Video süresi")
@@ -36,7 +37,7 @@ def main(argv=None):
         plan = create_plan(a.prompt, a.out, a.lang, length=a.length)
         if a.plan_only:
             return
-    render_plan(plan, a.out, a.style, a.voice, a.music, a.no_voice, a.lang, subtitles=a.subtitles, sfx=not a.no_sfx)
+    render_plan(plan, a.out, a.style, a.voice, a.music, a.no_voice, a.lang, subtitles=a.subtitles, sfx=not a.no_sfx, vertical=a.vertical)
 
 
 if __name__ == "__main__":

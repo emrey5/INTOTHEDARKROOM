@@ -266,7 +266,8 @@ class Worker(QThread):
                 o = self.opts
                 out = pipeline.render_plan(self.plan, self.out_dir, o.get("style"), o.get("voice") or None,
                                            o.get("music") or None, not o.get("voice"), cb=cb,
-                                           subtitles=o.get("subtitles", False), sfx=o.get("sfx", True))
+                                           subtitles=o.get("subtitles", False), sfx=o.get("sfx", True),
+                                           vertical=o.get("vertical", False))
                 self.finished_ok.emit(out)
         except pipeline.Cancelled:
             self.failed.emit("İptal edildi.")
@@ -411,6 +412,9 @@ class MainWindow(QMainWindow):
         v.addLayout(h)
         v.addWidget(self.music)
         self.on_music_mode()
+
+        v.addWidget(self._section("Dikey sürüm (Shorts / Reels / TikTok)"))
+        self.vert = self._segmented([("0", "YOK"), ("1", "OLUŞTUR")], self.settings.value("vertical", "0"), v)
 
         v.addWidget(self._section("Ses efektleri"))
         self.sfx = self._segmented([("1", "AÇIK"), ("0", "KAPALI")], self.settings.value("sfx", "1"), v)
@@ -879,6 +883,7 @@ class MainWindow(QMainWindow):
         s.setValue("music", self.music.text())
         s.setValue("music_mode", self.music_mode.currentData())
         s.setValue("sfx", self.sfx.value())
+        s.setValue("vertical", self.vert.value())
         s.setValue("outdir", self.outdir.text())
         s.setValue("model", self.model.currentText())
         s.setValue("length", self.length.value())
@@ -934,7 +939,7 @@ class MainWindow(QMainWindow):
         self.save_settings()
         self.write_plan()
         opts = {"style": self.style, "voice": self.voice.currentData(), "music": self.music_choice(),
-                "sfx": self.sfx.value() == "1",
+                "sfx": self.sfx.value() == "1", "vertical": self.vert.value() == "1",
                 "subtitles": self.subs.value() == "1"}
         self.tabs.setCurrentIndex(0)
         self.worker = Worker("render", plan=self.plan, out_dir=self.plan_dir, opts=opts)
