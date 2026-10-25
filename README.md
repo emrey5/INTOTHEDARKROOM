@@ -22,8 +22,22 @@ Kurulumu denemek için: `DARKROOM.exe --selftest deneme` (2 sahnelik deneme vide
 
 Uygulamada:
 - **Konu** kutusuna videonun konusunu yazın ya da örneklerden birine tıklayın.
+- **Hazır stiller**: Belgesel, Haber, Sosyal, Minimal, DARKROOM, Çizgi film. Tek tıkla görünümü, müziği,
+  tempoyu, altyazıyı ve ek formatları birlikte ayarlar.
+- **Profil**: beğendiğin bütün ayarları bir isimle kaydet ("Benim stilim"), sonra tek tıkla geri yükle.
 - **Video süresi**: Kısa (~30 sn), Orta (~1 dk) ya da Uzun (~2 dk). Yapay zekâ sahne sayısını buna göre ayarlar.
-- **Altyazı**: "Videoya yaz" seçiliyse anlatım, konuşmayla eşzamanlı olarak alt şeritte görünür. Ayrı `altyazi.srt` dosyası her zaman oluşur.
+- **Video dili**: Türkçe ya da English (araştırma, senaryo ve seslendirme bu dilde olur).
+- **Stil ve format** sekmesi (bütün video ayarları tek sayfada, canlı önizlemeli):
+  - **Görünüm**: 6 stil; **vurgu rengi** ve **arka plan** hazır renklerden ya da "＋" ile istediğin renk.
+  - **Format ve kalite**: ana video 16:9; ayrıca **dikey 9:16** (`video_dikey.mp4`) ve **kare 1:1**
+    (`video_kare.mp4`). Çözünürlük 720p / 1080p / 1440p / **4K** (çizimler vektörel olduğu için 4K da keskin),
+    kare hızı 30 ya da **60 fps**.
+  - **Tempo**: yavaş / normal / hızlı (seslendirme hızı ve sahneler arası nefes payı).
+  - **Altyazı**: aç/kapa; boyut (küçük/orta/büyük), konum (alt/üst), görünüm (koyu kutu / renkli kutu / kutusuz).
+    Ayrı `altyazi.srt` dosyası her zaman oluşur.
+  - **Ses**: seslendirme sesi, müzik (sakin / enerjik / gizemli / epik / gerilim ya da kendi dosyan),
+    **müzik seviyesi** ve ses efektleri.
+- **⚙ Ayarlar**: uygulamanın kendi teması (koyu / açık) ve vurgu rengi, açılış efekti ve sesi (aç/kapa), kayıt klasörü.
 - **1 · Araştır**: Wikipedia, Wikidata, Dünya Bankası, Our World in Data, IMF ve web aramasından bilgi toplar.
   **Araştırma** sekmesinde her bilgiyi kaynağıyla görürsünüz; istemediklerinizin işaretini kaldırın.
 - **Kendi kaynağın**: Araştırma sekmesindeki **＋ Dosya ekle** ile PDF, Excel (xlsx), CSV ya da metin
@@ -32,11 +46,9 @@ Uygulamada:
   dönüşür. Araştırma yapmadan sadece kendi kaynaklarınla da video yapabilirsin.
 - **2 · Senaryoyu yaz**: yalnızca işaretli bilgilerden sahneleri yazar. Ardından **doğruluk kontrolü**
   senaryodaki her sayıyı kaynaklarda arar: bulunanlar ✓, bulunamayanlar ⚠ ile işaretlenir.
-- **Senaryo** sekmesi: sahneleri ekleyin, silin, sıralayın; başlık, anlatım ve verileri düzeltin,
-  "Önizle" ile anında görün.
-- **Arka plan müziği**: Yok, programın ürettiği telifsiz müzik (sakin / enerjik / gizemli) ya da kendi dosyan.
-  Müzik konuşma sırasında otomatik kısılır. **Ses efektleri** (whoosh, pop, tık, ding) animasyonlara denk gelir.
-- **Dikey sürüm**: "Oluştur" seçiliyse ayrıca 1080x1920 `video_dikey.mp4` (Shorts / Reels / TikTok) çıkar.
+- **Senaryo** sekmesi: sahneleri ekleyin, silin, çoğaltın, **sürükleyerek sıralayın**; başlık, anlatım,
+  süre, **sahneye özel renk** ve verileri düzeltin, "Önizle" ile anında görün.
+- Müzik konuşma sırasında otomatik kısılır. **Ses efektleri** (whoosh, pop, tık, ding) animasyonlara denk gelir.
 - **3 · Videoyu oluştur**: çizim sırasında kareler canlı önizlenir; bitince "Videoyu aç". Video klasöründe
   ayrıca `kapak.png` (YouTube kapak resmi) ve `youtube.txt` (başlık, açıklama, bölümler, kaynaklar, etiketler) olur.
 - **Videolarım**: önceki videolar; eski bir senaryoyu açıp yeniden çizebilirsiniz.
@@ -47,10 +59,10 @@ Uygulamada:
 python -m promptvideo "Türkiye'nin nüfusu 1960'tan bugüne nasıl değişti?"
 ```
 
-Uygulama her zaman siyah-turuncu `mekanik` görünümü kullanır. Komut satırında ayrıca `--style cizgi` (kâğıt üstüne elle çizilmiş çizgi film tarzı,
-titreyen çizgiler, doodle'lar, el yazısı notlar) ve `--style modern` (koyu, parlak, sinematik).
+Stiller: `mekanik` (varsayılan, siyah-turuncu), `modern`, `belgesel`, `haber`, `minimal`, `cizgi` (kâğıt üstüne
+elle çizilmiş çizgi film tarzı).
 
-Çıktı `cikti/` klasörüne yazılır: `video.mp4` (1920x1080, 30 fps), `plan.json` (senaryo), `altyazi.srt`.
+Çıktı `cikti/` klasörüne yazılır: `video.mp4` (varsayılan 1920x1080, 30 fps), `plan.json` (senaryo), `altyazi.srt`.
 
 ## Nasıl çalışır
 
@@ -89,7 +101,9 @@ python -m promptvideo "..." --plan-only               # sadece plan.json üret
 python -m promptvideo --plan cikti/plan.json          # planı elle düzeltip yeniden çiz
 python -m promptvideo --plan ornekler/demo_plan.json  # internetsiz demo
 python -m promptvideo "..." --length kisa --subtitles  # ~30 sn, altyazılı
-python -m promptvideo "..." --style modern          # koyu sinematik görünüm
+python -m promptvideo "..." --style haber --accent "#2ED47A"   # stil ve vurgu rengi
+python -m promptvideo "..." --quality 2160 --fps 60  # 4K, 60 fps
+python -m promptvideo "..." --square --tempo hizli --music auto:epik --music-volume 50
 ```
 
 En iyi sonuç için önce `--plan-only` çalıştırıp `plan.json`'daki rakamları ve metinleri

@@ -11,7 +11,7 @@ import cairo
 from . import draw as D
 from . import theme as th
 from .scenes import DRAWERS, media_scene
-from .theme import W, H, FPS, clamp, ease_out_cubic
+from .theme import W, H, clamp, ease_out_cubic
 
 
 
@@ -29,8 +29,13 @@ def _find_ffmpeg():
 
 FFMPEG = _find_ffmpeg()
 _NOWIN = {"creationflags": 0x08000000} if os.name == "nt" else {}  # Windows'ta konsol penceresi açma
-ENC = ["-c:v", "libx264", "-preset", os.environ.get("PV_PRESET", "medium"),
-       "-crf", os.environ.get("PV_CRF", "19"), "-pix_fmt", "yuv420p", "-r", str(FPS)]
+def enc():
+    """x264 ayarları; kare hızı o anki seçime (30/60) göre."""
+    return ["-c:v", "libx264", "-preset", os.environ.get("PV_PRESET", "medium"),
+            "-crf", os.environ.get("PV_CRF", "19"), "-pix_fmt", "yuv420p", "-r", str(th.FPS)]
+
+
+ENC = enc()  # eski kullanım için (30 fps)
 AUD = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
 TR = 0.55  # geçiş süresi (sn), sahnenin sonunda kapanır, sonrakinin başında açılır
 BOIL_EVERY = 4  # çizgi stilinde çizgiler kaç karede bir "titresin"
@@ -46,7 +51,7 @@ class VideoReader:
     """Klipten 1920x1080 BGRA kareler okur (gerekirse başa sarar)."""
 
     def __init__(self, path, dur):
-        vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},format=bgra"
+        vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={th.FPS},format=bgra"
         self.proc = subprocess.Popen(
             [FFMPEG, "-loglevel", "error", "-stream_loop", "-1", "-i", path, "-t", f"{dur + 1:.2f}",
              "-vf", vf, "-f", "rawvideo", "-pix_fmt", "bgra", "-"], stdout=subprocess.PIPE, **_NOWIN)
@@ -70,7 +75,7 @@ class VideoReader:
 
 
 def render_frame(ctx, sc, t, dur, gt, total_t, sidx, nscenes, video_surf=None):
-    D.BOIL = int(gt * FPS) // BOIL_EVERY if th.SKETCH else 0
+    D.BOIL = int(gt * 30) // BOIL_EVERY if th.SKETCH else 0  # 60 fps'te de aynı hızda titrer
     D.background(ctx, gt)
     D.SUBS = bool(sc.get("_subs") and sc.get("narration") and sc["type"] != "character")  # karakterde balon yeter
     # ilk sahne yumuşak açılır, son sahne yumuşak kapanır; aradaki kesmeleri geçiş perdeleri örter
@@ -80,10 +85,11 @@ def render_frame(ctx, sc, t, dur, gt, total_t, sidx, nscenes, video_surf=None):
     if sidx == nscenes - 1:
         a *= clamp((dur - t) / 0.8)
     ctx.push_group()
-    if sc["type"] == "video":
-        media_scene(ctx, sc, t, dur, video_surf)
-    else:
-        DRAWERS.get(sc["type"], DRAWERS["bullets"])(ctx, sc, t, dur)
+    with th.scene_accent(sc.get("accent")):  # sahneye özel vurgu rengi
+        if sc["type"] == "video":
+            media_scene(ctx, sc, t, dur, video_surf)
+        else:
+            DRAWERS.get(sc["type"], DRAWERS["bullets"])(ctx, sc, t, dur)
     ctx.pop_group_to_source()
     ctx.paint_with_alpha(a)
     if D.SUBS:
@@ -114,15 +120,16 @@ def progress_bar(ctx, p):
 
 def render_scene(sc, out_path, t_offset, total_t, sidx, nscenes, audio=None, on_frame=None):
     dur = sc["duration"]
+    ow, oh = th.out_size()
     cmd = [FFMPEG, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgra",
-           "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", *_audio_inputs(audio),
-           "-map", "0:v", "-map", "1:a", "-af", "apad", "-t", f"{dur:.3f}", *ENC, *AUD, out_path]
+           "-s", f"{ow}x{oh}", "-r", str(th.FPS), "-i", "-", *_audio_inputs(audio),
+           "-map", "0:v", "-map", "1:a", "-af", "apad", "-t", f"{dur:.3f}", *enc(), *AUD, out_path]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, **_NOWIN)
     reader = VideoReader(sc["video_path"], dur) if sc["type"] == "video" and sc.get("video_path") else None
     surf, ctx = D.new_surface()
     try:
-        for f in range(int(round(dur * FPS))):
-            t = f / FPS
+        for f in range(int(round(dur * th.FPS))):
+            t = f / th.FPS
             vs = reader.next() if reader else None
             ctx.save()
             render_frame(ctx, sc, t, dur, t_offset + t, total_t, sidx, nscenes, vs)
@@ -143,7 +150,7 @@ def render_scene(sc, out_path, t_offset, total_t, sidx, nscenes, audio=None, on_
         raise RuntimeError(f"ffmpeg sahne {sidx} için başarısız oldu")
 
 
-def concat(parts, out_path, music=None, sfx=None):
+def concat(parts, out_path, music=None, sfx=None, music_vol=0.35):
     lst = out_path + ".txt"
     with open(lst, "w", encoding="utf-8") as f:
         for p in parts:
@@ -158,7 +165,7 @@ def concat(parts, out_path, music=None, sfx=None):
         if music:
             # müzik düşük seviyede çalar, konuşma varken otomatik kısılır (sidechain ducking)
             ins += ["-i", music]
-            fc += [f"[{len(ins) // 2 - 1}:a]volume=0.35,aloop=loop=-1:size=2e9[m]",
+            fc += [f"[{len(ins) // 2 - 1}:a]volume={music_vol:.2f},aloop=loop=-1:size=2e9[m]",
                    "[m][vk]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[md]"]
             mix.append("[md]")
         else:

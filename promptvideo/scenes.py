@@ -513,7 +513,7 @@ def draw_table(ctx, sc, t, dur):
         if sk:
             D.rough_stroke_poly(ctx, [(x0, yy + rh), (x0 + (total) * clamp(p), yy + rh)], th.GRID, 3, passes=1, key=i + 30)
         elif i % 2 == 0:
-            ctx.set_source_rgba(1, 1, 1, 0.05 * a)
+            ctx.set_source_rgba(*th.GLASS, 0.05 * a)
             D.round_rect(ctx, x0 + off, yy + 4, total, rh - 8, 14)
             ctx.fill()
         x = x0 + off

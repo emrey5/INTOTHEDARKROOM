@@ -1,12 +1,28 @@
-"""Görsel tema: çözünürlük, iki stil (modern / çizgi), yazı tipleri, easing fonksiyonları.
+"""Görsel tema: çözünürlük, stiller, yazı tipleri, easing fonksiyonları.
 
-Stil `apply_style("modern")` ya da `apply_style("cizgi")` ile seçilir; diğer modüller değerleri
-`theme.TEXT` gibi modül üzerinden okur.
+Stil `apply_style("modern")` gibi seçilir; vurgu ve arka plan rengi isteğe göre değiştirilebilir.
+Diğer modüller değerleri `theme.TEXT` gibi modül üzerinden okur.
+
+Sahneler her zaman 1920x1080 "tasarım alanında" çizilir; SCALE ile çıktı 720p'den 4K'ya kadar
+keskin (vektörel) büyütülür. FPS 30 ya da 60 olabilir.
 """
 import os
 
-W, H = 1920, 1080
+W, H = 1920, 1080  # tasarım alanı
 FPS = 30
+SCALE = 1.0  # çıktı = tasarım alanı x SCALE (720p: 2/3, 4K: 2)
+QUALITIES = {"720": 2 / 3, "1080": 1.0, "1440": 4 / 3, "2160": 2.0}
+
+
+def set_output(quality="1080", fps=30):
+    global SCALE, FPS
+    SCALE = QUALITIES.get(str(quality), 1.0)
+    FPS = int(fps) if int(fps) in (24, 30, 60) else 30
+
+
+def out_size():
+    """Çıktı videosunun piksel boyutu (çift sayı, x264 için)."""
+    return int(round(W * SCALE / 2)) * 2, int(round(H * SCALE / 2)) * 2
 FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 
 
@@ -34,6 +50,33 @@ STYLES = {
         FONTS=dict(body="Inter-Regular.ttf", bold="JetBrainsMono-Bold.ttf", display="Inter-ExtraBold.ttf",
                    hand="JetBrainsMono-Regular.ttf"),
     ),
+    # Belgesel: koyu kömür, altın vurgu, sakin ve ağırbaşlı
+    "belgesel": dict(
+        SKETCH=False,
+        BG="#0E0C0A", BG2="#1E1912", TEXT="#F3EDE2", MUTED="#A39A8B", GRID="#2E271E",
+        INK="#F3EDE2", ACCENT="#E0B04A", ACCENT2="#F2D59A", HILITE="#E0B04A",
+        PALETTE=["#E0B04A", "#C9854A", "#8FA6A0", "#F2D59A", "#A0674B", "#D9CBB0", "#6E8B85", "#B89A6A"],
+        FONTS=dict(body="Inter-Regular.ttf", bold="Inter-SemiBold.ttf", display="Inter-ExtraBold.ttf",
+                   hand="Caveat-Bold.ttf"),
+    ),
+    # Haber: lacivert, kırmızı vurgu, güçlü ve net
+    "haber": dict(
+        SKETCH=False,
+        BG="#06102A", BG2="#0E1F4A", TEXT="#FFFFFF", MUTED="#A8B6D8", GRID="#1E3266",
+        INK="#FFFFFF", ACCENT="#E63946", ACCENT2="#FFFFFF", HILITE="#E63946",
+        PALETTE=["#E63946", "#FFFFFF", "#4DA3FF", "#FFC857", "#8FB3FF", "#FF8A8A", "#3DDC97", "#C0C8E0"],
+        FONTS=dict(body="Inter-Regular.ttf", bold="Inter-SemiBold.ttf", display="Inter-ExtraBold.ttf",
+                   hand="Inter-SemiBold.ttf"),
+    ),
+    # Minimal: açık zemin, koyu yazı, tek vurgu rengi
+    "minimal": dict(
+        SKETCH=False, LIGHT=True,
+        BG="#F6F5F1", BG2="#E9E7E0", TEXT="#16161A", MUTED="#6B6B73", GRID="#D3D0C6",
+        INK="#16161A", ACCENT="#2F5BFF", ACCENT2="#7C9BFF", HILITE="#2F5BFF",
+        PALETTE=["#2F5BFF", "#16161A", "#8A8F9C", "#FF5C39", "#5AA9E6", "#B9BCC6", "#2E2E38", "#7C8CFF"],
+        FONTS=dict(body="Inter-Regular.ttf", bold="Inter-SemiBold.ttf", display="Inter-ExtraBold.ttf",
+                   hand="Inter-SemiBold.ttf"),
+    ),
     # Kâğıt üstüne elle çizilmiş çizgi film / doodle görünümü
     "cizgi": dict(
         SKETCH=True,
@@ -45,15 +88,26 @@ STYLES = {
     ),
 }
 
+STYLE_NAMES = {"mekanik": "DARKROOM (siyah-turuncu)", "modern": "Modern (mor-mavi)", "belgesel": "Belgesel",
+               "haber": "Haber", "minimal": "Minimal (açık)", "cizgi": "Çizgi film"}
+
 STYLE = "modern"
-SKETCH = False
-BG = BG2 = TEXT = MUTED = GRID = INK = ACCENT = ACCENT2 = HILITE = (0, 0, 0)
+SKETCH = LIGHT = False
+BG = BG2 = TEXT = MUTED = GRID = INK = ACCENT = ACCENT2 = HILITE = GLASS = (0, 0, 0)
 PALETTE = []
 FONTS = {}
+_OPTS = {}
 
 
-def apply_style(name):
-    global STYLE, SKETCH, BG, BG2, TEXT, MUTED, GRID, INK, ACCENT, ACCENT2, HILITE, PALETTE, FONTS
+def apply_style(name, accent=None, bg=None):
+    """Stili uygular. accent / bg: "#RRGGBB" ile stilin vurgu ve arka plan rengini değiştirir.
+    Verilmezse bir önceki apply_style çağrısındaki renk seçimi korunur (accent="" ile sıfırlanır)."""
+    global STYLE, SKETCH, LIGHT, BG, BG2, TEXT, MUTED, GRID, INK, ACCENT, ACCENT2, HILITE, GLASS, PALETTE, FONTS
+    name = name if name in STYLES else "mekanik"
+    if accent is not None:
+        _OPTS["accent"] = accent
+    if bg is not None:
+        _OPTS["bg"] = bg
     s = STYLES[name]
     STYLE = name
     SKETCH = s["SKETCH"]
@@ -61,9 +115,34 @@ def apply_style(name):
         hex2rgb(s[k]) for k in ("BG", "BG2", "TEXT", "MUTED", "GRID", "INK", "ACCENT", "ACCENT2", "HILITE"))
     PALETTE = [hex2rgb(c) for c in s["PALETTE"]]
     FONTS = {k: os.path.join(FONT_DIR, v) for k, v in s["FONTS"].items()}
+    if _OPTS.get("accent"):
+        set_accent(_OPTS["accent"])
+    if _OPTS.get("bg"):
+        b = hex2rgb(_OPTS["bg"])
+        BG, BG2 = b, mix(b, ACCENT, 0.10)
+    LIGHT = luma(BG) > 0.55  # açık zeminde yazılar koyu olmalı
+    if LIGHT != s.get("LIGHT", SKETCH) and not SKETCH:
+        TEXT = INK = (0.09, 0.09, 0.1) if LIGHT else (0.96, 0.95, 0.93)
+        MUTED = mix(TEXT, BG, 0.45)
+    if not SKETCH:
+        GRID = mix(BG, TEXT, 0.14)
+    GLASS = (0, 0, 0) if LIGHT else (1, 1, 1)  # kartların ince dolgusu
 
 
-apply_style(os.environ.get("PV_STYLE", "mekanik"))
+def luma(c):
+    return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+
+
+def set_accent(hexcol):
+    """Vurgu rengini değiştirir; ikinci vurgu ve paletin ilk rengi de buna uyar."""
+    global ACCENT, ACCENT2, HILITE, PALETTE
+    a = hex2rgb(hexcol)
+    old = ACCENT
+    ACCENT = HILITE = a
+    ACCENT2 = mix(a, (1, 1, 1), 0.4) if luma(a) < 0.7 else mix(a, (0, 0, 0), 0.3)
+    PALETTE = [a] + [c for c in PALETTE if c != old][:7]
+
+
 
 
 def clamp(x, a=0.0, b=1.0):
@@ -136,3 +215,27 @@ def fmt_num(v, lang="tr", decimals=None):
     if lang == "tr":
         s = s.replace(",", "X").replace(".", ",").replace("X", ".")
     return s + suffix
+
+
+class scene_accent:
+    """Tek bir sahne için vurgu rengini geçici olarak değiştirir: `with scene_accent("#FF0000"): ...`"""
+
+    def __init__(self, hexcol):
+        self.hex = hexcol
+
+    def __enter__(self):
+        self.saved = (ACCENT, ACCENT2, HILITE, list(PALETTE))
+        if self.hex:
+            try:
+                set_accent(self.hex)
+            except ValueError:
+                pass
+        return self
+
+    def __exit__(self, *exc):
+        global ACCENT, ACCENT2, HILITE, PALETTE
+        ACCENT, ACCENT2, HILITE, PALETTE = self.saved
+        return False
+
+
+apply_style(os.environ.get("PV_STYLE", "mekanik"))

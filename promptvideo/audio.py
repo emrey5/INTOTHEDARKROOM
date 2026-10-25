@@ -9,7 +9,7 @@ import wave
 import numpy as np
 
 SR = 44100
-MOODS = {"enerjik": "Enerjik", "sakin": "Sakin", "gizemli": "Gizemli"}
+MOODS = {"enerjik": "Enerjik", "sakin": "Sakin", "gizemli": "Gizemli", "epik": "Epik", "gerilim": "Gerilim"}
 
 
 def _t(dur):
@@ -152,6 +152,8 @@ PROGS = {  # akor dizileri (MIDI notaları), tempo, davul yoğunluğu
     "enerjik": ([[60, 64, 67], [55, 59, 62], [57, 60, 64], [53, 57, 60]], 108, 2),
     "sakin": ([[57, 60, 64], [53, 57, 60], [60, 64, 67], [55, 59, 62]], 84, 1),
     "gizemli": ([[50, 53, 57], [46, 50, 53], [43, 46, 50], [45, 49, 52]], 76, 0),
+    "epik": ([[57, 60, 64], [53, 57, 60], [60, 64, 67], [55, 59, 62]], 96, 2),
+    "gerilim": ([[45, 48, 52], [46, 49, 53], [45, 48, 52], [44, 47, 51]], 100, 1),
 }
 
 

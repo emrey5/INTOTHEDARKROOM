@@ -17,11 +17,19 @@ def main(argv=None):
     ap.add_argument("--out", default="cikti", help="Çıktı klasörü (varsayılan: cikti)")
     ap.add_argument("--lang", default="tr")
     ap.add_argument("--voice", help="edge-tts ses adı, ör. tr-TR-EmelNeural")
-    ap.add_argument("--music", help="Arka plan müziği: dosya yolu ya da auto:sakin / auto:enerjik / auto:gizemli")
+    ap.add_argument("--music", help="Arka plan müziği: dosya yolu ya da auto:sakin / enerjik / gizemli / epik / gerilim")
     ap.add_argument("--no-sfx", action="store_true", help="Ses efektlerini kapat")
     ap.add_argument("--vertical", action="store_true", help="Ayrıca 9:16 dikey (Shorts) sürüm üret")
     ap.add_argument("--plan-only", action="store_true", help="Sadece planı oluştur, videoyu çizme")
-    ap.add_argument("--style", choices=["modern", "cizgi", "mekanik"], help="Görünüm (varsayılan: mekanik)")
+    ap.add_argument("--square", action="store_true", help="Ayrıca 1:1 kare sürüm üret")
+    ap.add_argument("--style", choices=["mekanik", "modern", "belgesel", "haber", "minimal", "cizgi"],
+                    help="Görünüm (varsayılan: mekanik)")
+    ap.add_argument("--accent", help="Vurgu rengi, ör. #FF7A1A")
+    ap.add_argument("--bg", help="Arka plan rengi, ör. #050505")
+    ap.add_argument("--quality", choices=["720", "1080", "1440", "2160"], default="1080", help="Çözünürlük")
+    ap.add_argument("--fps", type=int, choices=[30, 60], default=30)
+    ap.add_argument("--tempo", choices=["yavas", "normal", "hizli"], default="normal")
+    ap.add_argument("--music-volume", type=float, default=35, help="Müzik seviyesi (0-100, varsayılan 35)")
     ap.add_argument("--length", choices=["kisa", "orta", "uzun"], default="orta", help="Video süresi")
     ap.add_argument("--subtitles", action="store_true", help="Altyazıyı videonun üstüne yaz")
     ap.add_argument("--no-voice", action="store_true", help="Seslendirmeyi kapat")
@@ -37,7 +45,9 @@ def main(argv=None):
         plan = create_plan(a.prompt, a.out, a.lang, length=a.length)
         if a.plan_only:
             return
-    render_plan(plan, a.out, a.style, a.voice, a.music, a.no_voice, a.lang, subtitles=a.subtitles, sfx=not a.no_sfx, vertical=a.vertical)
+    render_plan(plan, a.out, a.style, a.voice, a.music, a.no_voice, a.lang, subtitles=a.subtitles, sfx=not a.no_sfx,
+                vertical=a.vertical, square=a.square, quality=a.quality, fps=a.fps, tempo=a.tempo,
+                accent=a.accent, bg=a.bg, music_vol=a.music_volume / 100)
 
 
 if __name__ == "__main__":
