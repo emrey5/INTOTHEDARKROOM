@@ -30,6 +30,9 @@ SCHEMA = """
     {"type": "table", "kicker": "...", "title": "...", "columns": ["...", "..."], "rows": [["...", "..."]], "source": "...", "narration": "..."},
     {"type": "image", "kicker": "...", "caption": "...", "image_query": "Wikimedia Commons'ta aranacak İngilizce terim", "narration": "..."},
     {"type": "video", "kicker": "...", "caption": "...", "stock_query": "stok video için 1-3 kelimelik İngilizce arama", "narration": "..."},
+    {"type": "character", "kicker": "...", "characters": [{"look": 0, "pose": "talk", "emotion": "happy"}], "say": [{"who": 0, "text": "karakterin söylediği kısa cümle"}], "narration": "..."},
+    {"type": "versus", "kicker": "...", "title": "...", "left": {"label": "...", "value": 1.0}, "right": {"label": "...", "value": 2.0}, "unit": "", "higher_is_better": true, "source": "...", "narration": "..."},
+    {"type": "people", "kicker": "...", "title": "...", "value": 30, "total": 100, "label": "Her 100 kişiden 30'u ...", "source": "...", "narration": "..."},
     {"type": "outro", "title": "...", "sources": ["kaynak adı"], "narration": "..."}
   ]
 }
@@ -48,6 +51,10 @@ Kurallar:
 - Sayılar JSON number olsun (ör. 85.3), metin değil.
 - Zaman serisi için "line", karşılaştırma için "bar", pay/oran için "pie", çok sütunlu veri için
   "table", tek çarpıcı sayı için "stat". En az bir "image" ve bir "video" sahnesi ekle.
+- Videoyu canlı tut: 1-2 "character" sahnesi ekle (çizgi karakterler konuşur; "say" balonda görünür,
+  1-2 kısa cümle; iki karakter soru-cevap yapabilir). look 0-5 farklı karakterlerdir; pose: talk, point,
+  present, wave, cheer, shrug, think; emotion: happy, neutral, surprised, sad, angry, worried.
+  İki şeyi kıyaslarken "versus", bir oranı (yüzde) anlatırken "people" kullan.
 - Kısa yaz: başlıklar en fazla 60 karakter, maddeler en fazla 80 karakter, tablo en fazla 8 satır.
 - Metinler kullanıcının dilinde (varsayılan Türkçe); image_query ve stock_query İngilizce.
 Yalnızca şu şemaya uyan JSON döndür:
@@ -113,6 +120,9 @@ def plan_fallback(prompt, findings, lang="tr", log=print):
     sents = _sentences(wiki["text"], 5) if wiki else []
     scenes.append({"type": "title", "title": title, "subtitle": _short(sents[0], 110) if sents else "",
                    "narration": sents[0] if sents else title})
+    scenes.append({"type": "character", "kicker": "Anlatıcı", "characters": [{"look": 0, "pose": "wave"}],
+                   "say": [{"who": 0, "text": f"Merhaba! Bugün {title} konusuna birlikte bakıyoruz."}],
+                   "narration": f"Merhaba! Bugün {title} konusuna birlikte bakıyoruz."})
     scenes.append({"type": "video", "stock_query": title, "caption": title, "kicker": "",
                    "narration": sents[1] if len(sents) > 1 else ""})
     if wiki and wiki.get("image"):
@@ -143,9 +153,20 @@ def plan_fallback(prompt, findings, lang="tr", log=print):
                            "suffix": f" {unit}" if unit and unit != "$" else "", "prefix": "$" if unit == "$" else "",
                            "label": label, "source": f["source"],
                            "narration": f"En güncel veriye göre {label.lower()} {_fmt(v1, unit)}."})
+            if unit == "%" and 0 < v1 <= 100:
+                scenes.append({"type": "people", "kicker": name, "title": label, "value": round(v1, 1), "total": 100,
+                               "label": f"Her 100 kişiden yaklaşık {round(v1)} tanesi.", "source": f["source"],
+                               "narration": f"Yani her 100 kişiden yaklaşık {round(v1)} tanesi."})
         la = f.get("latest")
         if la and len(la["rows"]) > 2:
             rows, unit, label = la["rows"], la["unit"], la["label"]
+            hi = next((r for r in rows if r[0] == la.get("highlight")), None)
+            other = max((r for r in rows if r is not hi), key=lambda r: r[2], default=None)
+            if hi and other:
+                scenes.append({"type": "versus", "kicker": "Karşılaştırma", "title": label, "unit": unit,
+                               "left": {"label": hi[0], "value": hi[2]}, "right": {"label": other[0], "value": other[2]},
+                               "source": f["source"],
+                               "narration": f"{hi[0]}: {_fmt(hi[2], unit)}. {other[0]}: {_fmt(other[2], unit)}."})
             scenes.append({"type": "bar", "kicker": "Karşılaştırma", "title": f"{label}: ülkeler", "unit": unit,
                            "highlight": la.get("highlight"), "source": f["source"],
                            "data": [{"label": n, "value": v} for n, _, v in rows],
@@ -192,7 +213,8 @@ def trim_plan(plan, length="orta"):
     """Yedek planı seçilen süreye sığdırır: başlık ve kapanış kalır, aradakiler kısalır."""
     sc, mx = plan["scenes"], LENGTHS.get(length, LENGTHS["orta"])[1]
     if len(sc) > mx:
-        prio = {"title": 0, "outro": 0, "line": 1, "stat": 2, "bar": 3, "bullets": 4, "image": 5, "video": 6}
+        prio = {"title": 0, "outro": 0, "character": 1, "line": 1, "stat": 2, "versus": 2, "bar": 3, "people": 3,
+                "bullets": 4, "image": 5, "video": 6}
         keep = sorted(sorted(range(len(sc)), key=lambda i: (prio.get(sc[i]["type"], 7), i))[:mx])
         plan["scenes"] = [sc[i] for i in keep]
     return plan

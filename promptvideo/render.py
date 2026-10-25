@@ -72,7 +72,7 @@ class VideoReader:
 def render_frame(ctx, sc, t, dur, gt, total_t, sidx, nscenes, video_surf=None):
     D.BOIL = int(gt * FPS) // BOIL_EVERY if th.SKETCH else 0
     D.background(ctx, gt)
-    D.SUBS = bool(sc.get("_subs") and sc.get("narration"))
+    D.SUBS = bool(sc.get("_subs") and sc.get("narration") and sc["type"] != "character")  # karakterde balon yeter
     # ilk sahne yumuşak açılır, son sahne yumuşak kapanır; aradaki kesmeleri geçiş perdeleri örter
     a = 1.0
     if sidx == 0:

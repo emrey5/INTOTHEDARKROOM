@@ -5,6 +5,7 @@ import math
 import cairo
 
 from . import draw as D
+from . import characters as C
 from . import theme as th
 from .theme import (W, H, clamp, prog, lerp, ease_out_cubic, ease_out_back, ease_out_expo,
                     ease_in_out, ease_out_elastic, fmt_num, mix)
@@ -654,8 +655,137 @@ def draw_outro(ctx, sc, t, dur):
             D.draw_text(ctx, s, cx, 575 + i * 52 + (1 - qi) * 16, 30, th.MUTED, alpha=qi, align="center")
 
 
+# --- Karakterli sahneler ----------------------------------------------------
+
+def _say_lines(sc):
+    say = sc.get("say") or []
+    if isinstance(say, str):
+        say = [{"who": 0, "text": say}]
+    return [x if isinstance(x, dict) else {"who": 0, "text": str(x)} for x in say if x]
+
+
+def _chars(sc, n=2):
+    cs = sc.get("characters") or [{}]
+    return [c if isinstance(c, dict) else {} for c in cs[:n]]
+
+
+def draw_character_scene(ctx, sc, t, dur):
+    """Bir ya da iki karakter konuşur; repliği konuşma balonunda görünür."""
+    chars = _chars(sc)
+    lines = _say_lines(sc)
+    n = len(lines)
+    span = max(0.5, dur - 1.0)
+    cur = min(n - 1, int(clamp((t - 0.4) / span) * n)) if n else -1
+    line_start = 0.4 + cur * span / max(1, n)
+    two = len(chars) > 1
+    xs = (430, 1490) if two else (470,)
+    sc_ = 1.0 if two else 1.12
+    for i, c in enumerate(chars):
+        speaking = (n and lines[cur].get("who", 0) == i) or (not n and i == 0)
+        pose = c.get("pose") or ("talk" if speaking else "idle")
+        C.draw_character(ctx, xs[i], 1015, t, sc_, look=c.get("look", i * 2), pose=pose, prev_pose="idle",
+                         pose_t=prog(t, 0.35, 0.5), emotion=c.get("emotion", "happy"),
+                         talking=bool(speaking and t < dur - 0.5), facing=-1 if i == 1 else 1, seed=i * 3 + 1,
+                         enter=prog(t, 0.05 + 0.15 * i, 0.5))
+    if sc.get("kicker") or sc.get("title"):
+        x0 = 640 if two else 860
+        k = (sc.get("kicker") or "").upper()
+        if k:
+            D.draw_text(ctx, k, x0, 130, 26, th.ACCENT, alpha=clamp(t * 3), kind="bold")
+        if sc.get("title"):
+            D.anim_text(ctx, sc["title"], x0, 195, 56, t, 0.1, "display", stagger=0.02, dur=0.45)
+    if n:
+        who = lines[cur].get("who", 0) if two else 0
+        head_x, mouth_y = xs[min(who, len(xs) - 1)], 1015 - 430 * sc_
+        if two:
+            bx, by, bw = 560, 250, 800
+        else:
+            bx, by, bw = 860, 260, 900
+        C.bubble(ctx, lines[cur]["text"], bx, by, bw, t, line_start,
+                 tail_x=head_x + (165 if who == 0 else -165) * sc_, tail_y=mouth_y, size=44)
+    D.footer_source(ctx, sc.get("source"), t)
+
+
+def draw_versus(ctx, sc, t, dur):
+    """İki taraf karşı karşıya: sayılar sayarak büyür, kazanan sevinir."""
+    D.header(ctx, sc.get("title", ""), sc.get("kicker"), t)
+    left, right = sc.get("left") or {}, sc.get("right") or {}
+    lv, rv = _num(left.get("value")), _num(right.get("value"))
+    hib = sc.get("higher_is_better", True)
+    reveal = 1.8
+    win = None if lv == rv else (0 if (lv > rv) == bool(hib) else 1)
+    unit = sc.get("unit", "")
+    for i, (side, v, x) in enumerate(((left, lv, 520), (right, rv, 1400))):
+        done = t > reveal
+        if done and win is not None:
+            pose, emo = ("cheer", "happy") if i == win else ("shrug", "sad")
+        else:
+            pose, emo = "idle", "neutral"
+        C.draw_character(ctx, x, 1020, t, 0.9, look=side.get("look", i * 3), pose=pose, prev_pose="idle",
+                         pose_t=prog(t, reveal, 0.4), emotion=emo, facing=1 if i == 0 else -1, seed=i * 5 + 2,
+                         enter=prog(t, 0.2 + i * 0.15, 0.5))
+        p = ease_out_expo(prog(t, 0.6, 1.2))
+        num = (sc.get("prefix", "") + fmt_num(v * p, LANG) + (f" {unit}" if unit and unit not in ("$",) else "")
+               if unit != "$" else "$" + fmt_num(v * p, LANG))
+        size = D.fit_size(num, 92, 700, "display")
+        col = th.ACCENT if (done and i == win) else th.TEXT
+        D.draw_text(ctx, num, x, 380, size, col, alpha=clamp((t - 0.5) * 3), kind="display", align="center")
+        D.draw_text(ctx, str(side.get("label", "")), x, 432, 38, th.MUTED, alpha=clamp((t - 0.6) * 3),
+                    kind="bold", align="center")
+    q = ease_out_back(prog(t, 0.5, 0.5), 2.2)
+    if q > 0:
+        ctx.save()
+        ctx.translate(W / 2, 700)
+        ctx.scale(q, q)
+        ctx.set_source_rgb(*th.ACCENT)
+        ctx.arc(0, 0, 70, 0, math.tau)
+        ctx.fill()
+        D.draw_text(ctx, "VS", 0, 20, 58, (0.05, 0.05, 0.05), kind="display", align="center")
+        ctx.restore()
+    D.footer_source(ctx, sc.get("source"), t)
+
+
+def draw_people(ctx, sc, t, dur):
+    """Piktogram: 100 (ya da 10) kişiden kaçının bu gruba girdiğini gösterir."""
+    D.header(ctx, sc.get("title", ""), sc.get("kicker"), t)
+    total = _num(sc.get("total")) or 100
+    share = clamp(_num(sc.get("value")) / total)
+    n = 10 if sc.get("icons") == 10 else 100
+    k = round(share * n)
+    cols = 10
+    rows = n // cols
+    ih = 64 if n == 100 else 190
+    gx, gy = (88, 70) if n == 100 else (88, 0)
+    x0, y0 = 960, 340 + ih if n == 100 else 760
+    if n == 10:
+        gx, x0 = 84, 960
+    for j in range(n):
+        r, c = divmod(j, cols)
+        x = x0 + c * gx + 40
+        y = y0 + (rows - 1 - r) * gy if n == 100 else y0
+        on = j < k
+        appear = ease_out_cubic(prog(t, 0.2 + j * 0.004, 0.4))
+        lit = ease_out_back(prog(t, 0.9 + j * (1.6 / max(1, k)), 0.3), 2.5) if on else 0
+        C.person_icon(ctx, x, y, ih, mix(th.GRID, th.MUTED, 0.3), 0.8 * appear)
+        if lit > 0:
+            ctx.save()
+            ctx.translate(x, y)
+            ctx.scale(lit, lit)
+            C.person_icon(ctx, 0, 0, ih, th.ACCENT)
+            ctx.restore()
+    p = ease_out_expo(prog(t, 0.8, 1.8))
+    pct = "%" + fmt_num(share * 100 * p, LANG, 0 if (share * 100).is_integer() else 1)
+    if sc.get("format") == "count":
+        pct = f"{round(k * p)} / {n}"
+    D.draw_text(ctx, pct, 140, 560, 200, th.ACCENT, alpha=clamp((t - 0.6) * 3), kind="display")
+    for i, ln in enumerate(D.wrap(sc.get("label", ""), 44, 720, "body")[:4]):
+        D.anim_text(ctx, ln, 140, 660 + i * 58, 44, t, 1.2 + i * 0.2, "body", color=th.TEXT, stagger=0.012,
+                    dur=0.35, mode="rise")
+    D.footer_source(ctx, sc.get("source"), t)
+
+
 DRAWERS = {
     "title": draw_title, "bullets": draw_bullets, "stat": draw_stat, "bar": draw_bar,
     "line": draw_line, "pie": draw_pie, "table": draw_table, "image": draw_image,
-    "outro": draw_outro,
+    "outro": draw_outro, "character": draw_character_scene, "versus": draw_versus, "people": draw_people,
 }

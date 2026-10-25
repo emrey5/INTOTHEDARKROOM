@@ -53,7 +53,7 @@ titreyen çizgiler, doodle'lar, el yazısı notlar) ve `--style modern` (koyu, p
 | 2. Senaryo | Araştırma notlarından 6-10 sahnelik plan yazar; sayıları sadece notlardan alır | **Ollama** ile bilgisayarınızda çalışan açık kaynak model (varsayılan `qwen3:8b`). Ollama yoksa kural tabanlı planlayıcı |
 | 3. Medya | Görseller ve özgür lisanslı videolar | Wikimedia Commons (anahtarsız), isterseniz Pexels (ücretsiz anahtar) |
 | 4. Ses | Doğal Türkçe seslendirme | `edge-tts` (tr-TR-AhmetNeural / EmelNeural), yedek gTTS |
-| 5. Animasyon | Her kare Cairo ile vektörel çizilir: harf harf zıplayan/yükselen metinler, fosforlu kalem vurguları, sayan sayaçlar, yaylanarak büyüyen çubuklar, kendini çizen çizgi grafik, açılan pasta dilimleri, kayan tablo satırları, bantla yapıştırılmış fotoğraf kartları; sahneler arasında 5 çeşit geçiş (eğik silme, daire, şerit, panjur, kayan panel) | `pycairo`, programa gömülü ücretsiz fontlar (Inter, Baloo 2, Caveat; OFL lisanslı) |
+| 5. Animasyon | Her kare Cairo ile vektörel çizilir: harf harf zıplayan/yükselen metinler, fosforlu kalem vurguları, sayan sayaçlar, yaylanarak büyüyen çubuklar, kendini çizen çizgi grafik, açılan pasta dilimleri, kayan tablo satırları, bantla yapıştırılmış fotoğraf kartları; göz kırpan, konuşurken ağzı oynayan, el kol hareketi yapan düz renkli çizgi karakterler (6 karakter, 9 poz, 6 duygu, konuşma balonu), iki tarafın yarıştığı VS sahnesi ve 100 kişilik insan piktogramı; sahneler arasında 5 çeşit geçiş (eğik silme, daire, şerit, panjur, kayan panel) | `pycairo`, programa gömülü ücretsiz fontlar (Inter, Baloo 2, Caveat; OFL lisanslı) |
 | 6. Montaj | Sahneleri sesle birleştirir, isterseniz müziği konuşma sırasında otomatik kısar | `ffmpeg` |
 
 ## Kurulum (bir kerelik)

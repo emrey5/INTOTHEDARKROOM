@@ -28,10 +28,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCENE_TYPES = {
     "title": "Başlık", "bullets": "Madde listesi", "stat": "Büyük sayı", "bar": "Çubuk grafik",
     "line": "Çizgi grafik", "pie": "Pasta grafik", "table": "Tablo", "image": "Görsel",
-    "video": "Video klip", "outro": "Kapanış",
+    "video": "Video klip", "character": "Karakter konuşur", "versus": "Karşılaştırma (VS)",
+    "people": "İnsan piktogramı", "outro": "Kapanış",
 }
 SCENE_ICONS = {"title": "✦", "bullets": "☰", "stat": "#", "bar": "▤", "line": "📈", "pie": "◔",
-               "table": "▦", "image": "🖼", "video": "🎬", "outro": "★"}
+               "table": "▦", "image": "🖼", "video": "🎬", "character": "☺", "versus": "⚔",
+               "people": "☷", "outro": "★"}
 VOICES = [("Ahmet (erkek)", "tr-TR-AhmetNeural"), ("Emel (kadın)", "tr-TR-EmelNeural"),
           ("Sessiz", "")]
 EXAMPLES = [
@@ -53,6 +55,12 @@ SAMPLE_SCENES = {
               "rows": [["A", "1"], ["B", "2"]]},
     "image": {"type": "image", "kicker": "", "caption": "Açıklama", "image_query": "landscape"},
     "video": {"type": "video", "kicker": "", "caption": "Açıklama", "stock_query": "city"},
+    "character": {"type": "character", "kicker": "", "characters": [{"look": 0, "pose": "talk", "emotion": "happy"}],
+                  "say": [{"who": 0, "text": "Merhaba! Bugün ilginç bir konuya bakıyoruz."}]},
+    "versus": {"type": "versus", "kicker": "Karşılaştırma", "title": "Başlık", "unit": "",
+               "left": {"label": "A", "value": 10}, "right": {"label": "B", "value": 7}},
+    "people": {"type": "people", "kicker": "Oran", "title": "Başlık", "value": 30, "total": 100,
+               "label": "Her 100 kişiden 30'u"},
     "outro": {"type": "outro", "title": "İzlediğiniz için teşekkürler", "sources": []},
 }
 COMMON_KEYS = ("type", "kicker", "title", "narration", "duration")

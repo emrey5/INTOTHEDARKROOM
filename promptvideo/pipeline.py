@@ -12,7 +12,7 @@ from . import scenes, tts
 from .render import render_scene, concat
 
 MIN_DUR = {"title": 5, "bullets": 7, "stat": 5, "bar": 7, "line": 8, "pie": 7, "table": 7,
-           "image": 5, "video": 5, "outro": 5}
+           "image": 5, "video": 5, "outro": 5, "character": 5, "versus": 7, "people": 7}
 
 
 class Callbacks:
@@ -180,6 +180,9 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
         if _cb.cancelled():
             raise Cancelled()
         audio = None
+        if sc["type"] == "character" and not sc.get("narration"):  # anlatım yoksa balondaki replikler okunur
+            from .scenes import _say_lines
+            sc["narration"] = " ".join(x.get("text", "") for x in _say_lines(sc))
         if not no_voice and sc.get("narration"):
             audio = tts.synthesize(sc["narration"], os.path.join(assets, f"voice_{i:02}.mp3"), lang, voice)
         sc["_audio"] = audio

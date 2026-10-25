@@ -123,6 +123,15 @@ def scene_claims(sc):
         for row in sc.get("rows", []):
             for cell in row[1:] if len(row) > 1 else row:
                 out += numbers_in(str(cell))
+    if t == "versus":
+        out += [(None, float(sc[k]["value"])) for k in ("left", "right")
+                if isinstance(sc.get(k), dict) and isinstance(sc[k].get("value"), (int, float))]
+    if t == "people" and isinstance(sc.get("value"), (int, float)):
+        out.append((None, float(sc["value"])))
+    if t == "character":
+        from .scenes import _say_lines
+        for x in _say_lines(sc):
+            out += numbers_in(x.get("text", ""))
     if sc.get("narration"):
         out += numbers_in(sc["narration"])
     for it in sc.get("items", []) if t == "bullets" else []:
