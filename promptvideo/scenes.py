@@ -954,9 +954,174 @@ def draw_map(ctx, sc, t, dur):
     D.footer_source(ctx, sc.get("source"), t)
 
 
+# --- Zaman çizelgesi ve önce/sonra -----------------------------------------------
+
+def draw_timeline(ctx, sc, t, dur):
+    """Yatay zaman çizgisi: çizgi soldan sağa çizilir, olaylar sırayla belirir (üst/alt dönüşümlü)."""
+    D.header(ctx, sc.get("title", ""), sc.get("kicker"), t)
+    evs = [e for e in (sc.get("events") or []) if isinstance(e, dict)][:7]
+    n = max(1, len(evs))
+    gap = max(0.4, (dur - 2) / n)
+    x0, x1, y = 230, W - 230, 640
+    span = (x1 - x0) / max(1, n - 1) if n > 1 else 0
+    end_p = ease_in_out(prog(t, 0.3, 0.6 + (n - 1) * gap))
+    ctx.set_line_cap(cairo.LINE_CAP_ROUND)
+    ctx.set_source_rgba(*th.GRID, 1)
+    ctx.set_line_width(6)
+    ctx.move_to(x0 - 40, y)
+    ctx.line_to(x1 + 40, y)
+    ctx.stroke()
+    ctx.set_source_rgb(*th.ACCENT)
+    ctx.set_line_width(8)
+    ctx.move_to(x0 - 40, y)
+    ctx.line_to(x0 - 40 + (x1 - x0 + 80) * end_p, y)
+    ctx.stroke()
+    tw = min(380, span * 1.8) if n > 1 else 700
+    for i, e in enumerate(evs):
+        x = x0 + i * span if n > 1 else W / 2
+        st = 0.6 + i * gap
+        q = ease_out_back(prog(t, st, 0.35), 2.4)
+        if q <= 0:
+            continue
+        last = i == len(evs) - 1
+        up = i % 2 == 0
+        a = clamp((t - st) * 4)
+        # bağlantı çubuğu
+        stem = ease_out_cubic(prog(t, st + 0.05, 0.3)) * 70
+        ctx.set_source_rgba(*th.MUTED, 0.7 * a)
+        ctx.set_line_width(3)
+        ctx.move_to(x, y + (-16 if up else 16))
+        ctx.line_to(x, y + (-16 - stem if up else 16 + stem))
+        ctx.stroke()
+        ctx.save()
+        ctx.translate(x, y)
+        ctx.scale(q, q)
+        if last:
+            D.glow_circle(ctx, 0, 0, 46, th.ACCENT, 0.5)
+        ctx.set_source_rgb(*th.BG)
+        ctx.arc(0, 0, 22, 0, math.tau)
+        ctx.fill()
+        ctx.set_source_rgb(*th.ACCENT)
+        ctx.set_line_width(7)
+        ctx.arc(0, 0, 18, 0, math.tau)
+        ctx.stroke()
+        ctx.arc(0, 0, 8 if not last else 12, 0, math.tau)
+        ctx.fill()
+        ctx.restore()
+        year = str(e.get("year", ""))
+        ys = D.fit_size(year, 64, tw, "display")
+        x = clamp(x, 60 + tw / 2, W - 60 - tw / 2)  # kenardaki etiketler ekrandan taşmasın
+        lines = D.wrap(str(e.get("text", "")), 32, tw, "body")[:3]
+        if up:
+            ty = y - 100
+            base = ty - ys - 10 - (len(lines) - 1) * 40
+            D.anim_text(ctx, year, x, base, ys, t, st + 0.1, "display", color=th.ACCENT, align="center",
+                        stagger=0.03, dur=0.35, mode="rise")
+            for k, ln in enumerate(lines):
+                D.draw_text(ctx, ln, x, base + 50 + k * 40, 32, th.TEXT, alpha=clamp((t - st - 0.25) * 3),
+                            align="center")
+        else:
+            base = y + 100 + ys
+            D.anim_text(ctx, year, x, base, ys, t, st + 0.1, "display", color=th.ACCENT, align="center",
+                        stagger=0.03, dur=0.35, mode="rise")
+            for k, ln in enumerate(lines):
+                D.draw_text(ctx, ln, x, base + 50 + k * 40, 32, th.TEXT, alpha=clamp((t - st - 0.25) * 3),
+                            align="center")
+    D.footer_source(ctx, sc.get("source"), t)
+
+
+def _val_text(sc, v, unit):
+    if unit == "%":
+        return "%" + fmt_num(v, LANG)
+    if unit == "$":
+        return "$" + fmt_num(v, LANG)
+    return sc.get("prefix", "") + fmt_num(v, LANG) + (f" {unit}" if unit else "")
+
+
+def _change_text(a, b, unit=""):
+    if unit == "%":  # yüzdeler arasında fark puan olarak verilir
+        d = b - a
+        return f"{'+' if d >= 0 else '−'}{fmt_num(abs(d), LANG, 0 if abs(d) >= 10 else 1)} PUAN"
+    if a == 0:
+        return None
+    ch = (b - a) / abs(a) * 100
+    if abs(ch) >= 1000:
+        return f"{b / a:.1f}".replace(".", ",") + " KAT" if b / a > 0 else None
+    sign = "+" if ch >= 0 else "−"
+    return f"{sign}%{fmt_num(abs(ch), LANG, 0 if abs(ch) >= 10 else 1)}"
+
+
+def draw_compare(ctx, sc, t, dur):
+    """Önce / sonra: iki panel, sayılar sayar, ortada değişim rozeti belirir."""
+    if sc.get("backdrop"):
+        B.draw_backdrop(ctx, sc["backdrop"], t, alpha=0.35)
+    D.header(ctx, sc.get("title", ""), sc.get("kicker"), t)
+    before, after = sc.get("before") or {}, sc.get("after") or {}
+    bv, av = _num(before.get("value")), _num(after.get("value"))
+    unit = sc.get("unit", "")
+    hib = sc.get("higher_is_better", True)
+    good = (av >= bv) == bool(hib)
+    pw, ph, py = 700, 500, 320
+    for i, (side, v, st) in enumerate(((before, bv, 0.2), (after, av, 1.2))):
+        px = 140 if i == 0 else W - 140 - pw
+        p = ease_out_cubic(prog(t, st, 0.5))
+        if p <= 0:
+            continue
+        dx = (1 - p) * (-140 if i == 0 else 140)
+        ctx.save()
+        ctx.translate(dx, 0)
+        hl = i == 1
+        ctx.set_source_rgba(*(mix(th.BG, th.ACCENT, 0.12) if hl else mix(th.BG, th.GRID, 0.6)), 0.92 * p)
+        D.round_rect(ctx, px, py, pw, ph, 22)
+        ctx.fill_preserve()
+        ctx.set_source_rgba(*(th.ACCENT if hl else th.GRID), p)
+        ctx.set_line_width(4 if hl else 2)
+        ctx.stroke()
+        tag = str(side.get("tag") or ("ÖNCE" if i == 0 else "SONRA"))
+        D.draw_text(ctx, tag.upper(), px + 44, py + 70, 30, th.ACCENT if hl else th.MUTED, alpha=p, kind="bold")
+        D.draw_text(ctx, str(side.get("label", "")), px + 44, py + 140, D.fit_size(str(side.get("label", "")),
+                    64, pw - 88, "display"), th.TEXT, alpha=p, kind="display")
+        c = ease_out_expo(prog(t, st + 0.2, 1.0))
+        num = _val_text(sc, v * c, unit)
+        D.draw_text(ctx, num, px + 44, py + 330, D.fit_size(num, 150, pw - 88, "display"),
+                    th.ACCENT if hl else th.TEXT, alpha=p, kind="display")
+        for k, ln in enumerate(D.wrap(str(side.get("text", "")), 34, pw - 88, "body")[:3]):
+            D.draw_text(ctx, ln, px + 44, py + 410 + k * 44, 34, th.MUTED, alpha=clamp((t - st - 0.4) * 3))
+        ctx.restore()
+    # ok
+    a = ease_out_cubic(prog(t, 0.4, 0.6))
+    if a > 0:
+        cx, cy = W / 2, py + ph / 2
+        ctx.set_source_rgba(*th.ACCENT, a)
+        ctx.set_line_width(10)
+        ctx.set_line_cap(cairo.LINE_CAP_ROUND)
+        ctx.move_to(cx - 60, cy)
+        ctx.line_to(cx - 60 + 110 * a, cy)
+        ctx.stroke()
+        ctx.move_to(cx - 60 + 110 * a + 14, cy)
+        ctx.line_to(cx - 60 + 110 * a - 16, cy - 26)
+        ctx.line_to(cx - 60 + 110 * a - 16, cy + 26)
+        ctx.close_path()
+        ctx.fill()
+    ch = _change_text(bv, av, unit)
+    q = ease_out_back(prog(t, 2.3, 0.45), 2.4)
+    if ch and q > 0:
+        ctx.save()
+        ctx.translate(W / 2, py + ph + 80)
+        ctx.scale(q, q)
+        ctx.rotate(-0.04)
+        bw = D.text_width(ch, 64, "display") + 70
+        ctx.set_source_rgb(*(th.ACCENT if good else (0.85, 0.25, 0.22)))
+        D.round_rect(ctx, -bw / 2, -50, bw, 96, 18)
+        ctx.fill()
+        D.draw_text(ctx, ch, 0, 22, 64, (0.05, 0.05, 0.05), kind="display", align="center")
+        ctx.restore()
+    D.footer_source(ctx, sc.get("source"), t)
+
+
 DRAWERS = {
     "title": draw_title, "bullets": draw_bullets, "stat": draw_stat, "bar": draw_bar,
     "line": draw_line, "pie": draw_pie, "table": draw_table, "image": draw_image,
     "outro": draw_outro, "character": draw_character_scene, "versus": draw_versus, "people": draw_people,
-    "map": draw_map,
+    "map": draw_map, "timeline": draw_timeline, "compare": draw_compare,
 }

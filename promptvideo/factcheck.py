@@ -126,6 +126,13 @@ def scene_claims(sc):
     if t == "versus":
         out += [(None, float(sc[k]["value"])) for k in ("left", "right")
                 if isinstance(sc.get(k), dict) and isinstance(sc[k].get("value"), (int, float))]
+    if t == "compare":
+        out += [(None, float(sc[k]["value"])) for k in ("before", "after")
+                if isinstance(sc.get(k), dict) and isinstance(sc[k].get("value"), (int, float))]
+        out += [x for k in ("before", "after") for x in numbers_in(str((sc.get(k) or {}).get("text", "")))]
+    if t == "timeline":
+        for e in sc.get("events", []):
+            out += numbers_in(str(e.get("text", "")))
     if t == "people" and isinstance(sc.get("value"), (int, float)):
         out.append((None, float(sc["value"])))
     if t == "character":

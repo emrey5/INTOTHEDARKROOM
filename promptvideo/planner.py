@@ -33,6 +33,8 @@ SCHEMA = """
     {"type": "character", "kicker": "...", "backdrop": "studio", "characters": [{"look": 0, "pose": "talk", "emotion": "happy", "voice": "erkek ya da kadın"}], "say": [{"who": 0, "text": "karakterin söylediği kısa cümle"}], "narration": "..."},
     {"type": "versus", "kicker": "...", "backdrop": "studio", "title": "...", "left": {"label": "...", "value": 1.0}, "right": {"label": "...", "value": 2.0}, "unit": "", "higher_is_better": true, "source": "...", "narration": "..."},
     {"type": "people", "kicker": "...", "title": "...", "value": 30, "total": 100, "label": "Her 100 kişiden 30'u ...", "source": "...", "narration": "..."},
+    {"type": "timeline", "kicker": "...", "title": "...", "events": [{"year": "1923", "text": "kısa olay"}], "source": "...", "narration": "..."},
+    {"type": "compare", "kicker": "...", "title": "...", "unit": "", "higher_is_better": true, "before": {"label": "2000", "value": 1.0, "text": "kısa not"}, "after": {"label": "2024", "value": 2.0, "text": "kısa not"}, "source": "...", "narration": "..."},
     {"type": "map", "map": "world ya da turkey", "kicker": "...", "title": "...", "unit": "", "data": [{"label": "ülke ya da il adı", "value": 1.0}], "presenter": true, "source": "...", "narration": "..."},
     {"type": "outro", "title": "...", "sources": ["kaynak adı"], "narration": "..."}
   ]
@@ -60,6 +62,8 @@ Kurallar:
   İki şeyi kıyaslarken "versus", bir oranı (yüzde) anlatırken "people" kullan.
 - Ülkelere ya da Türkiye'nin illerine göre veri varsa "map" sahnesi kullan (map: "world" ya da "turkey";
   label olarak Türkçe ülke/il adı yaz). "presenter": true ise köşede haritayı gösteren bir karakter durur.
+- Tarihsel gelişmeleri "timeline" ile anlat (3-6 olay, yıl sırasıyla, her olay en fazla 50 karakter).
+  Bir şeyin eskiden ve şimdi nasıl olduğunu "compare" (önce/sonra) ile göster.
 - Kısa yaz: başlıklar en fazla 60 karakter, maddeler en fazla 80 karakter, tablo en fazla 8 satır.
 - Metinler kullanıcının dilinde (varsayılan Türkçe); image_query ve stock_query İngilizce.
 Yalnızca şu şemaya uyan JSON döndür:
@@ -123,6 +127,30 @@ BACKDROP_WORDS = {"space": ("uzay", "gezegen", "astronomi", "yıldız", "ay ", "
                   "nature": ("doğa", "iklim", "orman", "hayvan", "co2", "karbon", "enerji", "su ", "kahve", "tarım")}
 
 
+_YEAR = re.compile(r"\b(1[0-9]{3}|20[0-9]{2})(?:['’]?(?:te|ta|de|da|den|dan|e|a)\b)?"
+                   r"(?:\s+(?:yılında|yılı|yılından|itibarıyla|itibariyle|yılına kadar)\b)?", re.I)
+
+
+def year_events(text, n=6):
+    """Metindeki yıllı cümlelerden zaman çizelgesi olayları çıkarır (yıl sırasıyla)."""
+    out, seen = [], set()
+    for sent in re.split(r"(?<=[.!?])\s+", text or ""):
+        m = _YEAR.search(sent)
+        if not m or m.group(1) in seen or len(sent) < 25:
+            continue
+        rest = (sent[:m.start()] + sent[m.end():]).strip(" ,.;:-'’")
+        rest = re.sub(r"\s+", " ", rest)
+        if len(rest) < 12:
+            continue
+        seen.add(m.group(1))
+        out.append({"year": m.group(1), "text": _short(rest[0].upper() + rest[1:], 50)})
+    out.sort(key=lambda e: int(e["year"]))
+    if len(out) > n:  # baştan sona yayılan n olay seç
+        idx = sorted({round(i * (len(out) - 1) / (n - 1)) for i in range(n)})
+        out = [out[i] for i in idx]
+    return out
+
+
 def pick_backdrop(text):
     low = f" {text.lower()} "
     for name, words in BACKDROP_WORDS.items():
@@ -152,6 +180,11 @@ def plan_fallback(prompt, findings, lang="tr", log=print):
     if len(sents) > 3:
         scenes.append({"type": "bullets", "kicker": "Öne çıkanlar", "title": title,
                        "items": [_short(x) for x in sents[1:5]], "narration": " ".join(sents[3:5])})
+    evs = year_events(wiki["text"]) if wiki else []
+    if len(evs) >= 3:
+        scenes.append({"type": "timeline", "kicker": "Zaman çizelgesi", "title": title, "events": evs,
+                       "source": wiki.get("source", "Vikipedi"),
+                       "narration": " ".join(f"{e['year']}: {e['text'].rstrip('…')}." for e in evs[:3])})
     wd = next((f for f in sel if f["kind"] == "wikidata" and f.get("facts")), None)
     if wd:
         items = [f"{n}: {_fmt(v, u) if isinstance(v, float) else f'{v} {u}'.strip()}" for n, v, u, _ in wd["facts"][:5]]
@@ -174,6 +207,12 @@ def plan_fallback(prompt, findings, lang="tr", log=print):
                            "suffix": f" {unit}" if unit and unit != "$" else "", "prefix": "$" if unit == "$" else "",
                            "label": label, "source": f["source"],
                            "narration": f"En güncel veriye göre {label.lower()} {_fmt(v1, unit)}."})
+            if v0 and abs(v1 - v0) / abs(v0) > 0.05:
+                scenes.append({"type": "compare", "kicker": f"{name} · önce / sonra", "title": label, "unit": unit,
+                               "before": {"label": str(y0), "value": v0}, "after": {"label": str(y1), "value": v1},
+                               "source": f["source"],
+                               "narration": f"{y0} ile {y1} arasında {label.lower()} {_fmt(v0, unit)} "
+                                            f"düzeyinden {_fmt(v1, unit)} düzeyine geldi."})
             if unit == "%" and 0 < v1 <= 100:
                 scenes.append({"type": "people", "kicker": name, "title": label, "value": round(v1, 1), "total": 100,
                                "label": f"Her 100 kişiden yaklaşık {round(v1)} tanesi.", "source": f["source"],
@@ -242,7 +281,8 @@ def trim_plan(plan, length="orta"):
     """Yedek planı seçilen süreye sığdırır: başlık ve kapanış kalır, aradakiler kısalır."""
     sc, mx = plan["scenes"], LENGTHS.get(length, LENGTHS["orta"])[1]
     if len(sc) > mx:
-        prio = {"title": 0, "outro": 0, "character": 1, "line": 1, "map": 2, "stat": 2, "versus": 2, "bar": 3, "people": 3,
+        prio = {"title": 0, "outro": 0, "character": 1, "line": 1, "map": 2, "stat": 2, "versus": 2, "timeline": 2,
+                "compare": 3, "bar": 3, "people": 3,
                 "bullets": 4, "image": 5, "video": 6}
         keep = sorted(sorted(range(len(sc)), key=lambda i: (prio.get(sc[i]["type"], 7), i))[:mx])
         plan["scenes"] = [sc[i] for i in keep]

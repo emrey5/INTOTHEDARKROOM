@@ -29,11 +29,12 @@ SCENE_TYPES = {
     "title": "Başlık", "bullets": "Madde listesi", "stat": "Büyük sayı", "bar": "Çubuk grafik",
     "line": "Çizgi grafik", "pie": "Pasta grafik", "table": "Tablo", "image": "Görsel",
     "video": "Video klip", "character": "Karakter konuşur", "versus": "Karşılaştırma (VS)",
-    "people": "İnsan piktogramı", "map": "Harita", "outro": "Kapanış",
+    "people": "İnsan piktogramı", "map": "Harita", "timeline": "Zaman çizelgesi",
+    "compare": "Önce / sonra", "outro": "Kapanış",
 }
 SCENE_ICONS = {"title": "✦", "bullets": "☰", "stat": "#", "bar": "▤", "line": "📈", "pie": "◔",
                "table": "▦", "image": "🖼", "video": "🎬", "character": "☺", "versus": "⚔",
-               "people": "☷", "map": "🗺", "outro": "★"}
+               "people": "☷", "map": "🗺", "timeline": "⏱", "compare": "⇄", "outro": "★"}
 VOICES = [("Ahmet (erkek)", "tr-TR-AhmetNeural"), ("Emel (kadın)", "tr-TR-EmelNeural"),
           ("Sessiz", "")]
 MUSIC_MODES = [("Yok", ""), ("Otomatik · Sakin", "auto:sakin"), ("Otomatik · Enerjik", "auto:enerjik"),
@@ -65,6 +66,11 @@ SAMPLE_SCENES = {
                "label": "Her 100 kişiden 30'u"},
     "map": {"type": "map", "map": "turkey", "kicker": "Türkiye", "title": "Başlık", "unit": "",
             "data": [{"label": "İstanbul", "value": 15.7}, {"label": "Ankara", "value": 5.8}], "presenter": True},
+    "timeline": {"type": "timeline", "kicker": "Zaman çizelgesi", "title": "Başlık",
+                 "events": [{"year": "1923", "text": "Birinci olay"}, {"year": "1950", "text": "İkinci olay"},
+                            {"year": "2000", "text": "Üçüncü olay"}]},
+    "compare": {"type": "compare", "kicker": "Önce / sonra", "title": "Başlık", "unit": "",
+                "before": {"label": "2000", "value": 10, "text": ""}, "after": {"label": "2024", "value": 25, "text": ""}},
     "outro": {"type": "outro", "title": "İzlediğiniz için teşekkürler", "sources": []},
 }
 COMMON_KEYS = ("type", "kicker", "title", "narration", "duration")
