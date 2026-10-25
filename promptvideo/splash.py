@@ -39,15 +39,16 @@ def _back(x, s=1.8):
 
 
 def _sound_path():
-    """Mekanik açılış sesi: servo motor vızıltısı, dişli cırcırı, röle tıkları ve metal kilitlenme."""
-    path = os.path.join(tempfile.gettempdir(), "darkroom_acilis_v2.wav")
+    """Metal dövme sesi: örs üstünde çekiç vuruşları (her vuruştan sonra küçük sekme tıkı),
+    en sonda en ağır vuruş ve suya batırılan kızgın demirin tıslaması."""
+    path = os.path.join(tempfile.gettempdir(), "darkroom_acilis_v3.wav")
     if os.path.exists(path):
         return path
     import numpy as np
     from . import audio as A
     sr = A.SR
     rng = np.random.default_rng(11)
-    out = np.zeros(int(3.3 * sr))
+    out = np.zeros(int(3.6 * sr))
 
     def tt(d):
         return np.arange(int(d * sr)) / sr
@@ -57,67 +58,40 @@ def _sound_path():
         j = min(len(out), i + len(clip))
         out[i:j] += clip[: j - i] * gain
 
-    def hp(x, k=3):  # kaba yüksek geçiren: gürültüyü metalik yapar
+    def hp(x, k=2):
         return x - np.convolve(x, np.ones(k) / k, mode="same")
 
-    def click(f=3200, d=0.025, body=0.0):
-        """Metal tık: kısa gürültü patlaması + uyumsuz yüksek tınılar (+ isteğe bağlı gövde)."""
-        t = tt(d)
-        n = hp(rng.standard_normal(len(t)), 2) * np.exp(-t / 0.0015)
-        ring = sum(np.sin(2 * np.pi * f * m * t) * a for m, a in ((1, 0.6), (1.47, 0.35), (2.31, 0.2)))
-        x = n * 0.7 + ring * np.exp(-t / 0.004)
-        if body:
-            x += np.sin(2 * np.pi * 140 * t) * np.exp(-t / 0.012) * body
-        return x
+    def strike(f0=1050, ring=1.0, weight=1.0):
+        """Örs vuruşu: çelik çubuğun uyumsuz titreşim kipleri + çekiç darbesi + gövde gümbürtüsü."""
+        t = tt(0.4 + 1.6 * ring)
+        modes = ((1.0, 1.0, 0.9), (2.76, 0.55, 0.45), (5.40, 0.35, 0.22), (8.93, 0.22, 0.12), (1.5, 0.25, 0.6))
+        x = sum(a * np.sin(2 * np.pi * f0 * m * (1 + rng.uniform(-0.003, 0.003)) * t + rng.random() * 6)
+                * np.exp(-t / (dcy * ring)) for m, a, dcy in modes)
+        # hafif vuruntu (iki yakın frekans) metale canlılık verir
+        x *= 1 + 0.12 * np.sin(2 * np.pi * 5.5 * t)
+        hit = hp(rng.standard_normal(len(t))) * np.exp(-t / 0.0025) * 1.6
+        body = np.sin(2 * np.pi * np.cumsum(160 * np.exp(-t * 20) + 70) / sr) * np.exp(-t / 0.05) * weight
+        return (x * 0.55 + hit + body * 0.8) * np.minimum(1, t / 0.0008)
 
-    def clunk():
-        """Ağır metal kilitlenme: alçak darbe + çınlayan metal levha."""
-        t = tt(0.9)
-        thud = np.sin(2 * np.pi * np.cumsum(70 * np.exp(-t * 14) + 45) / sr) * np.exp(-t / 0.09)
-        plate = sum(np.sin(2 * np.pi * f * t + rng.random() * 6) * a * np.exp(-t / dcy)
-                    for f, a, dcy in ((412, 0.35, 0.25), (1133, 0.25, 0.14), (2157, 0.18, 0.08),
-                                      (3390, 0.12, 0.05), (5012, 0.08, 0.03)))
-        hit = hp(rng.standard_normal(len(t)), 2) * np.exp(-t / 0.006) * 0.8
-        return thud * 1.1 + plate + hit
+    def tap(f0):
+        """Çekicin örsten sekmesi: kısa, ince bir tın."""
+        return strike(f0 * 1.04, ring=0.18, weight=0.1) * 0.35
 
-    # alttaki elektrik uğultusu (50 Hz + harmonikler), yavaşça açılır kapanır
-    t = tt(3.2)
-    hum = sum(np.sin(2 * np.pi * 50 * k * t) * a for k, a in ((1, 0.5), (2, 0.25), (3, 0.18), (5, 0.08)))
-    hum *= np.minimum(1, t / 0.3) * np.clip((3.2 - t) / 0.5, 0, 1) * 0.06
-    put(0, hum)
-    # servo motor: diyafram açılırken yükselen kare dalga vızıltısı
-    d = 0.85
-    t = tt(d)
-    f = 90 + 230 * np.sin(np.minimum(1, t / d) * np.pi / 2)
-    ph = 2 * np.pi * np.cumsum(f) / sr
-    motor = np.sign(np.sin(ph)) * 0.5 + np.sin(2 * ph) * 0.3 + np.sin(5.03 * ph) * 0.15
-    motor = np.convolve(motor, np.ones(6) / 6, mode="same")  # kenarları yumuşat
-    motor *= (1 + 0.35 * np.sin(2 * np.pi * 28 * t)) * np.minimum(1, t / 0.05) * np.clip((d - t) / 0.12, 0, 1)
-    put(0.3, motor, 0.22)
-    # açılışta güç verme darbesi
-    put(0.04, clunk()[: int(0.4 * sr)], 0.55)
-    # dişli cırcırı: halka dönerken hızlanan tıklar
-    k, s_ = 0.32, 0.075
-    while k < 1.15:
-        put(k, click(2600 + rng.random() * 600, 0.02), 0.45)
-        k += s_
-        s_ = max(0.028, s_ * 0.88)
-    # harfler yerine otururken röle tıkları
-    for i in range(8):
-        put(0.85 + i * 0.07 + 0.28, click(3600, 0.03, body=0.6), 0.6)
-    # sistem satırları: kısa veri bip'leri
-    for i in range(4):
-        st = 0.6 + i * 0.38 + 0.25
-        bt = tt(0.05)
-        put(st, np.sign(np.sin(2 * np.pi * 1760 * bt)) * np.exp(-bt / 0.02) * 0.12)
-        put(st + 0.06, np.sign(np.sin(2 * np.pi * 2350 * bt)) * np.exp(-bt / 0.02) * 0.1)
-    # son kilitlenme ve basınçlı hava tıslaması
-    put(1.62, clunk(), 0.9)
-    ht = tt(0.7)
-    hiss = hp(rng.standard_normal(len(ht)), 2) * np.exp(-ht / 0.18) * np.minimum(1, ht / 0.01)
-    put(1.68, hiss, 0.18)
+    # ritim: VURUŞ ... tık, görüntüdeki anlarla eşleşir (diyafram, harfler, kilitlenme)
+    for sec, f0, g in ((0.08, 980, 0.75), (0.52, 1010, 0.8), (0.98, 1040, 0.85)):
+        put(sec, strike(f0, ring=0.8), g)
+        put(sec + 0.13, tap(f0), 1.0)
+        put(sec + 0.21, tap(f0) * 0.5, 1.0)
+    # son ve en ağır vuruş: uzun çınlama
+    put(1.60, strike(900, ring=1.5, weight=1.6), 1.0)
+    put(1.60, strike(1350, ring=1.0, weight=0.0), 0.35)  # ikinci tını: daha zengin metal
+    # kızgın demir suya: tıslama
+    ht = tt(1.3)
+    hiss = hp(rng.standard_normal(len(ht)), 3)
+    hiss *= np.minimum(1, ht / 0.04) * np.exp(-ht / 0.45) * (1 + 0.3 * rng.standard_normal(len(ht)) * 0.2)
+    put(2.0, hiss, 0.12)
     peak = np.max(np.abs(out)) or 1
-    A._write(path, np.tanh(out / peak * 1.4) * 0.85)
+    A._write(path, np.tanh(out / peak * 1.3) * 0.88)
     return path
 
 
