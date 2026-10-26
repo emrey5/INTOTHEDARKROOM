@@ -1,4 +1,4 @@
-"""Video türleri: gerçekçi, çizgi animasyon, infografik, haber, kinetik yazı, karakter anlatıyor, hikâye.
+"""Video türleri: gerçekçi, çizgi animasyon, infografik, haber, kinetik yazı, karakter anlatıyor.
 
 Tür üç şeyi belirler: görünüm (stil), yapay zekâya verilen senaryo talimatı ve senaryo yazıldıktan sonra
 sahnelerin türe uydurulması (ör. kinetik yazıda anlatım sahneleri büyük hareketli yazıya dönüşür).
@@ -31,10 +31,6 @@ KINDS = {
                      hint="Bu video KARAKTER ANLATIYOR türünde: aynı sunucu karakter (look 0) videonun çoğunda "
                           "konuşsun; anlatım sahneleri 'character' olsun ('say' = anlatımın kısa hali), veri "
                           "sahneleri arada kalsın. Haritada 'presenter': true kullan."),
-    "hikaye": dict(name="Hikâye animasyonu", label="HİKÂYE ANİMASYONU",
-                   desc="Ekran kartın her sahneyi çizer; sürükleyici kısa hikâye, büyük altyazı", style="modern",
-                   music="auto:epik", research=False,
-                   hint="Bu video HİKÂYE ANİMASYONU türünde (ayrı planlayıcı yazar)."),
     "piksel": dict(name="Retro piksel", label="RETRO PİKSEL", desc="8-bit oyun görünümü ve oyun müziği", style="piksel", music="auto:retro",
                    hint="Bu video RETRO PİKSEL (8-bit oyun) türünde: dil eğlenceli ve oyun havasında olsun "
                         "(ör. 'Seviye 1', 'Yeni bilgi açıldı!'); kicker'lar oyun terimleri olabilir. 1-2 'character' "
@@ -44,10 +40,6 @@ DEFAULT = "infografik"
 
 # promptta türü söyleyen kelimeler
 WORDS = {
-    # "kahvenin hikâyesi" gibi belgesel konuları tetiklemesin diye yalnızca açık ifadeler
-    "hikaye": ("hikaye animasyon", "hikâye animasyon", "animasyon hikaye", "animasyon hikâye", "kısa hikaye",
-               "kısa hikâye", "bir hikaye anlat", "bir hikâye anlat", "masal", "öykü", "kısa film",
-               "story animation", "short story", "animated story"),
     "piksel": ("piksel", "pixel", "8-bit", "8 bit", "retro", "oyun tarzı", "atari"),
     "gercekci": ("gerçekçi", "gercekci", "gerçek görüntü", "belgesel tarzı", "realistic", "sinematik"),
     "cizgi": ("çizgi film", "cizgi film", "çizgi animasyon", "animasyon", "karikatür", "cartoon"),
@@ -56,11 +48,6 @@ WORDS = {
     "kinetik": ("kinetik", "yazılı video", "yazı animasyonu", "motivasyon", "alıntı", "söz ", "typography"),
     "karakter": ("karakter anlat", "sunucu", "anlatıcı karakter", "karakterli", "presenter"),
 }
-
-
-def needs_research(kind):
-    """Hikâye gibi türler webde araştırma yapmaz, doğrudan senaryoya geçer."""
-    return KINDS.get(kind, {}).get("research", True)
 
 
 def detect(text):
@@ -112,7 +99,7 @@ DATA = ("bar", "line", "pie", "table", "map", "stat", "people", "timeline", "com
 
 def apply(plan, kind, topic=""):
     """Yazılmış senaryoyu türe uydurur (yerinde değiştirir ve döner)."""
-    if kind not in KINDS or kind == "hikaye" or not plan.get("scenes"):
+    if kind not in KINDS or not plan.get("scenes"):
         return plan
     plan["kind"] = kind
     sc = plan["scenes"]

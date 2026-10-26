@@ -55,14 +55,12 @@ def duration(path):
     return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 0.0
 
 
-def synthesize(text, path, lang="tr", voice=None, rate="+0%", edge=True):
-    """Metni mp3'e çevirir. Başarılıysa dosya yolunu, değilse None döner. edge=False: doğrudan gTTS."""
+def synthesize(text, path, lang="tr", voice=None, rate="+0%"):
+    """Metni mp3'e çevirir. Başarılıysa dosya yolunu, değilse None döner."""
     if not text or not text.strip():
         return None
     voice = voice or os.environ.get("PV_VOICE") or VOICES.get(lang, VOICES["en"])
     try:
-        if not edge:
-            raise RuntimeError("edge-tts atlandı")
         import edge_tts
 
         async def run():
@@ -71,8 +69,7 @@ def synthesize(text, path, lang="tr", voice=None, rate="+0%", edge=True):
         if os.path.getsize(path) > 0:
             return path
     except Exception as e:
-        if edge:
-            print(f"  [tts] edge-tts kullanılamadı ({type(e).__name__}), gTTS deneniyor")
+        print(f"  [tts] edge-tts kullanılamadı ({type(e).__name__}), gTTS deneniyor")
     try:
         from gtts import gTTS
         gTTS(text, lang=lang).save(path)
@@ -82,29 +79,3 @@ def synthesize(text, path, lang="tr", voice=None, rate="+0%", edge=True):
     if os.path.exists(path) and os.path.getsize(path) == 0:
         os.remove(path)
     return None
-
-
-def synthesize_words(text, path, lang="tr", voice=None, rate="+0%"):
-    """synthesize gibi; ayrıca her kelimenin söylendiği zamanı döner: (yol, [(başlangıç, bitiş, kelime)]).
-    Kelime zamanları yalnızca edge-tts ile gelir; gTTS'e düşülürse liste boş olur."""
-    if not text or not text.strip():
-        return None, []
-    voice = voice or os.environ.get("PV_VOICE") or VOICES.get(lang, VOICES["en"])
-    words = []
-    try:
-        import edge_tts
-
-        async def run():
-            with open(path, "wb") as f:
-                async for ch in edge_tts.Communicate(text, voice, rate=rate, boundary="WordBoundary").stream():
-                    if ch["type"] == "audio":
-                        f.write(ch["data"])
-                    elif ch["type"] == "WordBoundary":
-                        s = ch["offset"] / 1e7
-                        words.append((s, s + ch["duration"] / 1e7, ch["text"]))
-        asyncio.run(run())
-        if os.path.getsize(path) > 0:
-            return path, words
-    except Exception as e:
-        print(f"  [tts] edge-tts kullanılamadı ({type(e).__name__}), gTTS deneniyor")
-    return synthesize(text, path, lang, voice, rate, edge=False), []

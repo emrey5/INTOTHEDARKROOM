@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from . import theme, pipeline, planner, scenes, updater, userdata, __version__
 from .waitscreen import WaitScreen
-from . import ollama_setup, autoset, kinds, imagegen
+from . import ollama_setup, autoset, kinds
 from . import draw as D
 from .render import render_frame
 
@@ -33,11 +33,11 @@ SCENE_TYPES = {
     "line": "Çizgi grafik", "pie": "Pasta grafik", "table": "Tablo", "image": "Görsel",
     "video": "Video klip", "character": "Karakter konuşur", "versus": "Karşılaştırma (VS)",
     "people": "İnsan piktogramı", "map": "Harita", "timeline": "Zaman çizelgesi",
-    "compare": "Önce / sonra", "kinetic": "Kinetik yazı", "story": "Hikâye sahnesi", "outro": "Kapanış",
+    "compare": "Önce / sonra", "kinetic": "Kinetik yazı", "outro": "Kapanış",
 }
 SCENE_ICONS = {"title": "✦", "bullets": "☰", "stat": "#", "bar": "▤", "line": "📈", "pie": "◔",
                "table": "▦", "image": "🖼", "video": "🎬", "character": "☺", "versus": "⚔",
-               "people": "☷", "map": "🗺", "timeline": "⏱", "compare": "⇄", "kinetic": "Aa", "story": "🎨", "outro": "★"}
+               "people": "☷", "map": "🗺", "timeline": "⏱", "compare": "⇄", "kinetic": "Aa", "outro": "★"}
 VOICES_BY_LANG = {
     "tr": [("Ahmet (erkek)", "tr-TR-AhmetNeural"), ("Emel (kadın)", "tr-TR-EmelNeural"), ("Sessiz", "")],
     "en": [("Andrew (erkek)", "en-US-AndrewNeural"), ("Ava (kadın)", "en-US-AvaNeural"),
@@ -105,8 +105,6 @@ SAMPLE_SCENES = {
                             {"year": "2000", "text": "Üçüncü olay"}]},
     "compare": {"type": "compare", "kicker": "Önce / sonra", "title": "Başlık", "unit": "",
                 "before": {"label": "2000", "value": 10, "text": ""}, "after": {"label": "2024", "value": 25, "text": ""}},
-    "story": {"type": "story", "narration": "Ve o gece her şey değişti.", "camera": "zoom_in",
-              "image_prompt": "the main character looking up at a glowing night sky, wide shot", "show_character": True},
     "kinetic": {"type": "kinetic", "kicker": "Biliyor muydunuz?", "narration": "Kahve 15. yüzyılda Yemen'de içilmeye başlandı."},
     "outro": {"type": "outro", "title": "İzlediğiniz için teşekkürler", "sources": []},
 }
@@ -265,9 +263,6 @@ def render_still(scene, style, t=None, size=(960, 540), accent="", bg="", subs=N
     """Tek bir sahnenin bir karesini (varsayılan: animasyonlar bitmişken) çizer.
     subs: altyazı ayarları verilirse anlatım altyazı olarak da çizilir."""
     from PIL import Image
-    if scene.get("type") == "story":  # resmi ekran kartı çizer; önizlemede zemin + altyazı
-        from . import story
-        return story.still(scene, size, accent)
     theme.apply_style(style, accent=accent or "", bg=bg or "")
     key = (style, bg)
     D._paper = None if getattr(render_still, "_key", None) != key else D._paper
@@ -470,9 +465,7 @@ class Worker(QThread):
                 w.progress.emit(float(frac))
 
             def preview(self, im):
-                im = im.copy()
-                im.thumbnail((960, 540))  # dikey kareler (hikâye/Shorts) de oranı bozulmadan görünür
-                w.preview.emit(im)
+                w.preview.emit(im.resize((960, 540)))
 
             def cancelled(self):
                 return w._cancel.is_set()
@@ -589,68 +582,6 @@ class OllamaSetup(QThread):
             self.done.emit(ok, why)
         except Exception as e:
             self.done.emit(False, str(e))
-
-
-class ImageSetup(QThread):
-    """Tek tıkla görsel motoru: ComfyUI + çizim modelleri (Windows). slow: oyun modu, hız sınırlı."""
-    progress = Signal(object, str)
-    done = Signal(bool, str)
-
-    def __init__(self, slow=False):
-        super().__init__()
-        self.slow = slow
-        self._cancel = threading.Event()
-
-    def run(self):
-        try:
-            ok, why = imagegen.install(lambda f, msg: self.progress.emit(f, msg),
-                                       lambda m: self.progress.emit(None, m), self._cancel.is_set, self.slow)
-            self.done.emit(ok, why)
-        except Exception as e:
-            self.done.emit(False, str(e))
-
-
-class ImageGen(QThread):
-    """Resim stüdyosu: tarife göre bir ya da birkaç resim çizer, her biri bitince haber verir."""
-    drawn = Signal(str)
-    status = Signal(str)
-    done = Signal(bool, str)
-
-    def __init__(self, text, character, style, fmt, count, seed, out_dir):
-        super().__init__()
-        self.text, self.character, self.style, self.fmt = text, character, style, fmt
-        self.count, self.seed, self.out_dir = count, seed, out_dir
-        self._cancel = threading.Event()
-
-    def run(self):
-        try:
-            if not imagegen.server_up():
-                self.status.emit("Görsel motoru başlatılıyor… (ilk açılış bir iki dakika sürebilir)")
-                if not imagegen.start_server():
-                    self.done.emit(False, "Görsel motoru açılamadı. Kurulu olduğundan emin ol (üstteki şerit).")
-                    return
-            self.status.emit("Tarif çiziciye çevriliyor…")
-            scene = imagegen.to_english(self.text, self.status.emit)
-            char = imagegen.to_english(self.character, self.status.emit) if self.character else ""
-            prompt = imagegen.full_prompt(scene, char, self.style)
-            w, h = imagegen.FORMATS.get(self.fmt, imagegen.FORMATS["yatay"])
-            os.makedirs(self.out_dir, exist_ok=True)
-            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            for i in range(self.count):
-                if self._cancel.is_set():
-                    break
-                self.status.emit(f"Çiziliyor… {i + 1}/{self.count}")
-                path = os.path.join(self.out_dir, f"{stamp}-{slugify(self.text)}-{i + 1}.png")
-                imagegen.generate(prompt, path, w, h, self.seed + i, cancelled=self._cancel.is_set)
-                with open(path + ".json", "w", encoding="utf-8") as f:  # resmin tarifi: "benzerini çiz" için
-                    json.dump({"text": self.text, "character": self.character, "style": self.style, "format": self.fmt,
-                               "seed": self.seed + i, "prompt": prompt}, f, ensure_ascii=False, indent=2)
-                self.drawn.emit(path)
-            self.done.emit(True, "")
-        except Exception as e:
-            self.done.emit(False, str(e))
-        finally:
-            imagegen.release()  # ekran kartı belleği boşalsın
 
 
 # --- Ana pencere -------------------------------------------------------------
@@ -840,15 +771,12 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_research, "Araştırma")
         self.tabs.addTab(self.tab_editor, "Senaryo")
         self.tabs.addTab(self._build_library_tab(), "Videolarım")
-        self.tab_studio = self._build_studio_tab()
-        self.tabs.addTab(self.tab_studio, "Resim stüdyosu")
         self.tabs.currentChanged.connect(lambda _: self.tabs.currentWidget() is self.tab_style and self.refresh_style_preview())
         w = QWidget()
         l = QVBoxLayout(w)
         l.setContentsMargins(24, 12, 24, 20)
         l.addWidget(self._build_update_banner())
         l.addWidget(self._build_ai_banner())
-        l.addWidget(self._build_img_banner())
         l.addWidget(self._build_simple_panel())
         l.addWidget(self.tabs)
         return w
@@ -866,18 +794,8 @@ class MainWindow(QMainWindow):
         adv = QPushButton("⚙ GELİŞMİŞ MOD", objectName="chip")
         adv.setToolTip("Bütün ayarları elle seçmek, senaryoyu düzenlemek için")
         adv.clicked.connect(lambda: self.set_simple(False))
-        self.btn_studio = QPushButton("🎨 RESİM STÜDYOSU", objectName="chip")
-        self.btn_studio.setToolTip("Ekran kartınla resim çiz: karakter, sahne, kapak")
-        self.btn_studio.clicked.connect(self.toggle_studio)
-        top.addWidget(self.btn_studio)
         top.addWidget(adv)
         v.addLayout(top)
-        self.simple_video = QWidget()  # video kutusu ve türler; resim stüdyosunda gizlenir
-        vv = QVBoxLayout(self.simple_video)
-        vv.setContentsMargins(0, 0, 0, 0)
-        vv.setSpacing(8)
-        v.addWidget(self.simple_video)
-        v = vv
         row = QHBoxLayout()
         self.simple_prompt = QPlainTextEdit()
         self.simple_prompt.setPlaceholderText(
@@ -917,19 +835,9 @@ class MainWindow(QMainWindow):
         self._auto_timer.timeout.connect(self.update_auto_info)
         return self.simple_panel
 
-    def toggle_studio(self):
-        """Basit modda video ekranı ile resim stüdyosu arasında geçiş."""
-        on = self.tabs.currentWidget() is not self.tab_studio
-        self.tabs.setCurrentWidget(self.tab_studio if on else self.tab_preview)
-        self.simple_video.setVisible(not on)
-        self.btn_studio.setText("◀ VİDEO" if on else "🎨 RESİM STÜDYOSU")
-        if on:
-            self.check_image_engine("hikaye")
-
     def _on_kind_clicked(self, *_):
         self._kind_locked = True  # kullanıcı seçti: prompt artık türü değiştirmez
         self.update_auto_info()
-        self.check_image_engine(self.kind_sel.value())
 
     def set_simple(self, on):
         self.simple = on
@@ -954,7 +862,6 @@ class MainWindow(QMainWindow):
             return
         if not self._kind_locked:
             self.kind_sel.set_value(kinds.detect(text) or kinds.DEFAULT)
-            self.check_image_engine(self.kind_sel.value())
         _, why, topic = autoset.infer(text, self.kind_sel.value())
         self.auto_info.setText(f"KONU ▸ {topic}\nSEÇİLENLER ▸ " + "  ·  ".join(why))
 
@@ -972,14 +879,6 @@ class MainWindow(QMainWindow):
         self.auto_chain = True
         self.log.clear()
         self.append_log("Seçilen ayarlar: " + " · ".join(why))
-        if not kinds.needs_research(opts.get("kind")):  # hikâye: araştırma yok, doğrudan senaryo
-            self.save_settings()
-            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
-            self.plan_dir = os.path.join(self.outdir.text(), f"{stamp}-{slugify(topic)}")
-            self.research_prompt = text
-            self.findings = []
-            self.start_plan()
-            return
         self.start_research()
 
     def _build_ai_banner(self):
@@ -1006,97 +905,6 @@ class MainWindow(QMainWindow):
         h.addWidget(later)
         self.ai_banner.hide()
         return self.ai_banner
-
-    def _build_img_banner(self):
-        """Hikâye animasyonu seçilip görsel motoru kurulu değilse görünür."""
-        self.img_banner = QFrame(objectName="banner")
-        h = QHBoxLayout(self.img_banner)
-        h.setContentsMargins(14, 8, 8, 8)
-        col = QVBoxLayout()
-        self.img_banner_text = QLabel("", objectName="bannertext")
-        self.img_banner_text.setWordWrap(True)
-        col.addWidget(self.img_banner_text)
-        self.img_banner_bar = QProgressBar()
-        self.img_banner_bar.setRange(0, 1000)
-        self.img_banner_bar.setTextVisible(False)
-        self.img_banner_bar.setFixedHeight(5)
-        self.img_banner_bar.hide()
-        col.addWidget(self.img_banner_bar)
-        h.addLayout(col, 1)
-        self.btn_img_fast = QPushButton("⚡ GÖRSEL MOTORUNU KUR", objectName="primary")
-        self.btn_img_fast.setToolTip("Tam hızda indirir (≈9 GB).")
-        self.btn_img_fast.clicked.connect(lambda: self.setup_images(False))
-        self.btn_img_slow = QPushButton("🎮 YAVAŞ KUR")
-        self.btn_img_slow.setToolTip(f"İndirme hızını saniyede {imagegen.SLOW_MB} MB ile sınırlar: oyun oynarken "
-                                     "ya da video izlerken internet yavaşlamaz (≈1 saat).")
-        self.btn_img_slow.clicked.connect(lambda: self.setup_images(True))
-        self.btn_img_stop = QPushButton("■ DURDUR")
-        self.btn_img_stop.setToolTip("İndirmeyi durdurur; sonra kaldığı yerden devam eder.")
-        self.btn_img_stop.clicked.connect(lambda: getattr(self, "_img_setup", None) and self._img_setup._cancel.set())
-        self.btn_img_stop.hide()
-        later = QPushButton("SONRA")
-        later.clicked.connect(self.img_banner.hide)
-        for b in (self.btn_img_fast, self.btn_img_slow, self.btn_img_stop, later):
-            h.addWidget(b)
-        self.img_banner.hide()
-        return self.img_banner
-
-    def check_image_engine(self, kind=None):
-        """Hikâye türü seçiliyken görsel motoru yoksa kurulum şeridini gösterir."""
-        kind = kind or (self.kind_sel.value() if getattr(self, "simple", False) else self.kind_combo.currentData())
-        if kind != "hikaye" or imagegen.installed() or (getattr(self, "_img_setup", None) and self._img_setup.isRunning()):
-            if kind != "hikaye" and not (getattr(self, "_img_setup", None) and self._img_setup.isRunning()):
-                self.img_banner.hide()
-            return
-        self.img_banner_text.setText(
-            "HİKÂYE ANİMASYONU İÇİN GÖRSEL MOTORU GEREKLİ: SAHNELERİ SENİN EKRAN KARTIN ÇİZER (NVIDIA, 8 GB+). "
-            f"BİR KEZ KURULUR, ≈{imagegen.TOTAL_GB:.0f} GB, ÜCRETSİZ. KURULMAZSA RESİMLER YERİNE SADE ZEMİN KULLANILIR.")
-        self.img_banner.show()
-
-    def setup_images(self, slow):
-        if sys.platform != "win32" and not imagegen.server_up():
-            QMessageBox.information(self, APP_NAME, imagegen.install(None, None)[1])
-            return
-        msg = (f"Ücretsiz görsel motoru (ComfyUI) ve çizim modeli indirilecek: ≈{imagegen.TOTAL_GB:.0f} GB.\n\n"
-               + (f"Yavaş mod: hız saniyede {imagegen.SLOW_MB} MB ile sınırlı, yaklaşık 1 saat sürer; oyun "
-                  "oynarken internetin yavaşlamaz." if slow else
-                  "Tam hız: 100 Mbit internetle yaklaşık 15 dakika. İnternetin bu sırada yavaşlayabilir.")
-               + "\n\nİstediğin an durdurabilirsin; sonra kaldığı yerden devam eder. Başlatılsın mı?")
-        if QMessageBox.question(self, APP_NAME, msg) != QMessageBox.Yes:
-            return
-        for b in (self.btn_img_fast, self.btn_img_slow):
-            b.hide()
-        self.btn_img_stop.show()
-        self.img_banner_bar.setValue(0)
-        self.img_banner_bar.show()
-        self.img_banner.show()
-        self._img_setup = ImageSetup(slow)
-        self._img_setup.progress.connect(self.on_img_progress)
-        self._img_setup.done.connect(self.on_img_setup_done)
-        self._img_setup.start(QThread.LowPriority)  # bilgisayarı (ve oyunu) yormasın
-
-    def on_img_progress(self, frac, msg):
-        self.img_banner_text.setText(msg.upper())
-        if frac is None:
-            self.img_banner_bar.setRange(0, 0)
-        else:
-            self.img_banner_bar.setRange(0, 1000)
-            self.img_banner_bar.setValue(int(frac * 1000))
-
-    def on_img_setup_done(self, ok, why):
-        self.img_banner_bar.hide()
-        self.btn_img_stop.hide()
-        for b in (self.btn_img_fast, self.btn_img_slow):
-            b.show()
-        if ok:
-            self.img_banner_text.setText("GÖRSEL MOTORU HAZIR ✓  ARTIK HİKÂYE ANİMASYONLARININ SAHNELERİNİ EKRAN KARTIN ÇİZECEK.")
-            for b in (self.btn_img_fast, self.btn_img_slow):
-                b.hide()
-            QTimer.singleShot(6000, self.img_banner.hide)
-        elif "İptal" in why:
-            self.img_banner_text.setText("İNDİRME DURDURULDU. TEKRAR BASINCA KALDIĞI YERDEN DEVAM EDER.")
-        else:
-            self.img_banner_text.setText(f"GÖRSEL MOTORU KURULAMADI: {why}")
 
     # ---- güncelleme ----
     def _build_update_banner(self):
@@ -1603,199 +1411,6 @@ class MainWindow(QMainWindow):
         v.addLayout(h)
         return w
 
-    # ---- resim stüdyosu ----
-    def _build_studio_tab(self):
-        w = QWidget()
-        h = QHBoxLayout(w)
-        h.setContentsMargins(0, 16, 0, 0)
-        h.setSpacing(18)
-        left = QWidget()
-        left.setFixedWidth(400)
-        v = QVBoxLayout(left)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(8)
-        v.addWidget(QLabel("NE ÇİZİLSİN?", objectName="formlabel"))
-        self.st_text = QPlainTextEdit()
-        self.st_text.setPlaceholderText("ör. gece yağmurlu bir şehirde neon tabelaların altında yürüyen kedi, "
-                                        "arkadan geniş çekim")
-        self.st_text.setFixedHeight(110)
-        v.addWidget(self.st_text)
-        v.addWidget(QLabel("KARAKTER (HER RESİMDE AYNI KALIR)", objectName="formlabel"))
-        self.st_char = QLineEdit()
-        self.st_char.setPlaceholderText("ör. kırmızı atkılı, yeşil gözlü küçük turuncu kedi (boş bırakılabilir)")
-        v.addWidget(self.st_char)
-        v.addWidget(QLabel("TARZ", objectName="formlabel"))
-        self.st_style = self._segmented([(k, n.upper()) for k, n in imagegen.STYLE_NAMES.items()], "cartoon", v)
-        row1 = v.itemAt(v.count() - 1).layout()  # 5 düğme dar sütuna sığmaz: iki satıra böl
-        row2 = QHBoxLayout()
-        row2.setSpacing(6)
-        for b in self.st_style.buttons()[3:]:
-            row1.removeWidget(b)
-            row2.addWidget(b)
-        v.addLayout(row2)
-        v.addWidget(QLabel("FORMAT", objectName="formlabel"))
-        self.st_fmt = self._segmented([("yatay", "YATAY 16:9"), ("dikey", "DİKEY 9:16"), ("kare", "KARE 1:1")],
-                                      "yatay", v)
-        v.addWidget(QLabel("KAÇ RESİM", objectName="formlabel"))
-        self.st_count = self._segmented([("1", "1"), ("2", "2"), ("4", "4")], "2", v)
-        self.st_lock = QCheckBox("Tutarlı karakter ve renkler (sabit tohum)")
-        self.st_lock.setChecked(True)
-        v.addWidget(self.st_lock)
-        row = QHBoxLayout()
-        self.btn_draw = QPushButton("🎨  ÇİZ", objectName="primary")
-        self.btn_draw.setMinimumHeight(52)
-        self.btn_draw.clicked.connect(self.start_draw)
-        row.addWidget(self.btn_draw, 1)
-        self.btn_draw_stop = QPushButton("■ DURDUR", objectName="danger")
-        self.btn_draw_stop.clicked.connect(lambda: self._imgen and self._imgen._cancel.set())
-        self.btn_draw_stop.hide()
-        row.addWidget(self.btn_draw_stop)
-        v.addLayout(row)
-        self.st_status = QLabel("", objectName="status")
-        self.st_status.setWordWrap(True)
-        v.addWidget(self.st_status)
-        v.addStretch(1)
-        h.addWidget(left)
-
-        right = QVBoxLayout()
-        right.setSpacing(8)
-        self.st_big = QLabel("Çizdiğin resimler burada görünür.\nResimler senin ekran kartında çizilir; "
-                             "internete gönderilmez.", alignment=Qt.AlignCenter, objectName="status")
-        self.st_big.setMinimumHeight(380)
-        self.st_big.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
-        right.addWidget(self.st_big, 3)
-        self.st_gallery = QListWidget()
-        self.st_gallery.setViewMode(QListWidget.IconMode)
-        self.st_gallery.setIconSize(QSize(176, 99))
-        self.st_gallery.setResizeMode(QListWidget.Adjust)
-        self.st_gallery.setMovement(QListWidget.Static)
-        self.st_gallery.setFixedHeight(150)
-        self.st_gallery.setFlow(QListWidget.LeftToRight)
-        self.st_gallery.setWrapping(False)
-        self.st_gallery.currentItemChanged.connect(lambda it, _: self.show_studio_image(it))
-        self.st_gallery.itemDoubleClicked.connect(lambda it: self.open_path(it.data(Qt.UserRole)))
-        right.addWidget(self.st_gallery)
-        bh = QHBoxLayout()
-        for label, fn, tip in (("BENZERİNİ ÇİZ", self.draw_similar, "Aynı tarifle yeni çeşitler"),
-                               ("TARİFİ GERİ YÜKLE", self.reuse_recipe, "Bu resmin tarifini soldaki kutulara koyar"),
-                               ("AÇ", lambda: self._st_cur() and self.open_path(self._st_cur()), ""),
-                               ("KLASÖR", lambda: self.open_path(self.studio_dir()), ""),
-                               ("SİL", self.delete_studio_image, "")):
-            b = QPushButton(label)
-            b.setToolTip(tip)
-            b.clicked.connect(fn)
-            bh.addWidget(b)
-        bh.addStretch(1)
-        right.addLayout(bh)
-        h.addLayout(right, 1)
-        self._imgen = None
-        QTimer.singleShot(0, self.refresh_studio)
-        return w
-
-    def studio_dir(self):
-        return os.path.join(self.outdir.text(), "Resimler")
-
-    def _st_cur(self):
-        it = self.st_gallery.currentItem()
-        return it.data(Qt.UserRole) if it else None
-
-    def _st_item(self, path):
-        from PIL import Image
-        im = Image.open(path)
-        im.thumbnail((176, 176))
-        it = QListWidgetItem(QIcon(pil_to_pixmap(im)), "")
-        it.setData(Qt.UserRole, path)
-        it.setToolTip(os.path.basename(path))
-        return it
-
-    def refresh_studio(self):
-        self.st_gallery.clear()
-        d = self.studio_dir()
-        if not os.path.isdir(d):
-            return
-        for f in sorted((x for x in os.listdir(d) if x.endswith(".png")), reverse=True)[:120]:
-            try:
-                self.st_gallery.addItem(self._st_item(os.path.join(d, f)))
-            except Exception:
-                pass
-        if self.st_gallery.count():
-            self.st_gallery.setCurrentRow(0)
-
-    def show_studio_image(self, it):
-        if not it:
-            return
-        pm = QPixmap(it.data(Qt.UserRole))
-        self.st_big.setPixmap(pm.scaled(self.st_big.width(), self.st_big.height(), Qt.KeepAspectRatio,
-                                        Qt.SmoothTransformation))
-
-    def start_draw(self, seed=None):
-        text = self.st_text.toPlainText().strip()
-        if not text:
-            QMessageBox.information(self, APP_NAME, "Önce ne çizileceğini yaz.")
-            return
-        if self._imgen and self._imgen.isRunning():
-            return
-        if not imagegen.ready():
-            self.check_image_engine("hikaye")
-            QMessageBox.information(self, APP_NAME, "Resim çizmek için önce görsel motoru kurulmalı (üstteki şerit).")
-            return
-        import random
-        if seed is None:
-            seed = 1234 if self.st_lock.isChecked() else random.randint(1, 2 ** 31)
-        self._imgen = ImageGen(text, self.st_char.text().strip(), self.st_style.value(), self.st_fmt.value(),
-                               int(self.st_count.value()), seed, self.studio_dir())
-        self._imgen.drawn.connect(self.on_drawn)
-        self._imgen.status.connect(self.st_status.setText)
-        self._imgen.done.connect(self.on_draw_done)
-        self.btn_draw.setEnabled(False)
-        self.btn_draw_stop.show()
-        self._imgen.start()
-
-    def on_drawn(self, path):
-        it = self._st_item(path)
-        self.st_gallery.insertItem(0, it)
-        self.st_gallery.setCurrentItem(it)
-
-    def on_draw_done(self, ok, why):
-        self.btn_draw.setEnabled(True)
-        self.btn_draw_stop.hide()
-        self.st_status.setText("Hazır ✓  Beğenmediysen BENZERİNİ ÇİZ ile yeni çeşitler al." if ok else f"Çizilemedi: {why}")
-
-    def _recipe(self):
-        p = self._st_cur()
-        try:
-            with open(p + ".json", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return None
-
-    def reuse_recipe(self):
-        r = self._recipe()
-        if not r:
-            return
-        self.st_text.setPlainText(r.get("text", ""))
-        self.st_char.setText(r.get("character", ""))
-        self.st_style.set_value(r.get("style", "cartoon"))
-        self.st_fmt.set_value(r.get("format", "yatay"))
-
-    def draw_similar(self):
-        import random
-        if self._recipe():
-            self.reuse_recipe()
-        self.start_draw(random.randint(1, 2 ** 31))
-
-    def delete_studio_image(self):
-        p = self._st_cur()
-        if not p or QMessageBox.question(self, APP_NAME, "Bu resim silinsin mi?") != QMessageBox.Yes:
-            return
-        for f in (p, p + ".json"):
-            try:
-                os.remove(f)
-            except OSError:
-                pass
-        self.st_gallery.takeItem(self.st_gallery.currentRow())
-        self.st_big.setText("Resim silindi.")
-
     # ---- ayarlar ve küçük yardımcılar ----
     def _segmented(self, options, current, v, owner=None):
         """Yan yana, tek seçimli mekanik düğmeler. Seçili anahtarı .value() ile okunan, .set_value() ile
@@ -1907,7 +1522,6 @@ class MainWindow(QMainWindow):
         if kd.get("music"):
             o["music_mode"] = kd["music"]
         self.set_options(o)
-        self.check_image_engine(o["kind"])
 
     def look(self):
         """Videonun görünümü: (stil, vurgu, arka plan)."""

@@ -271,9 +271,6 @@ def _fmt(v, unit):
 def make_plan(prompt, lang="tr", log=print, length="orta", findings=None, kind=None):
     """Senaryoyu yazar ve video türüne uydurur. findings verilmezse önce araştırma yapılır."""
     from .kinds import apply
-    if kind == "hikaye":
-        from .story import plan_story
-        return plan_story(prompt, lang, log, length)
     return apply(_make_plan(prompt, lang, log, length, findings, kind), kind, prompt)
 
 

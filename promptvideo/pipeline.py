@@ -155,8 +155,7 @@ def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta", kin
 
 def create_plan(prompt, out_dir, lang="tr", cb=None, length="orta", kind=None):
     """Araştırma + senaryo tek adımda (komut satırı için)."""
-    from .kinds import needs_research
-    findings = research_topic(prompt, out_dir, lang, cb) if needs_research(kind) else []
+    findings = research_topic(prompt, out_dir, lang, cb)
     return write_plan(prompt, findings, out_dir, lang, cb, length, kind)
 
 
@@ -169,10 +168,6 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
     accent / bg: "#RRGGBB" ile stil renklerini değiştirir; sub_opts: altyazı boyut/konum/kutu."""
     global _cb
     _cb = cb or Callbacks()
-    if plan.get("kind") == "hikaye":  # resimleri ekran kartı çizer, ayrı bir çizim hattı
-        from . import story
-        return story.render(plan, out_dir, _cb, voice, music, no_voice, lang, vertical, quality, fps, tempo,
-                            accent, music_vol, sfx, preview_every)
     from . import theme
     from . import draw as D
     t0 = time.time()

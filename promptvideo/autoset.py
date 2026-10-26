@@ -81,9 +81,8 @@ def infer(prompt, kind=None):
 
     # konu türü
     topic = None
-    story = (kind or K.detect(t)) == "hikaye"  # hikâyede görünümü konu değil tür belirler
     for name, words, preset in TOPICS:
-        if not story and _has(t, words):
+        if _has(t, words):
             topic = name
             o.update(preset)
             why.append(f"konu: {TOPIC_NAMES[name]}")
@@ -112,7 +111,7 @@ def infer(prompt, kind=None):
     # sosyal medya / format
     if _has(t, ("shorts", "short video", "reels", "reel", "tiktok", "tik tok", "dikey")):
         o.update(vertical="1", length="kisa", tempo="hizli", sub_size="buyuk", sub_box="vurgu",
-                 music_mode=o["music_mode"] if topic or story else "auto:enerjik")
+                 music_mode=o["music_mode"] if topic else "auto:enerjik")
         why.append("dikey (Shorts/Reels)")
         cut += [r"(youtube\s+)?shorts?\w*", r"reels?\w*", r"tik\s?tok\w*", r"dikey\w*"]
     if _has(t, ("instagram", "kare format", "kare video", "1:1")):
