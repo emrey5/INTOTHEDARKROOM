@@ -20,6 +20,27 @@ ffmpeg ayrıca kurulmaz, uygulamanın içinde gelir.
 dosyasını derlerseniz başkalarına verebileceğiniz `DARKROOM-Kurulum.exe` çıkar.
 Kurulumu denemek için: `DARKROOM.exe --selftest deneme` (2 sahnelik deneme videosu çizer).
 
+**YouTube Shorts (varsayılan):** video baştan dikey 1080x1920 çizilir (yatay videonun kırpılmışı değil).
+İlk saniyede kanca cümlesi, kelime kelime büyük altyazı (söylenen kelime sarı), 2-3 saniyede bir değişen sahneler,
+hızlı geçişler; son cümle başa bağlanır, video döngüde tekrar izlenir. Veri sahneleri ortada büyük kart olarak,
+görüntüler tam ekran durur. Yatay video için promptta "yatay" ya da "uzun video" yaz veya Stil ve format >
+Video biçimi'nden seç.
+
+**Kanalı korumak için:** YouTube yapay zekâyı değil, birbirinin kopyası seri üretim videoları cezalandırıyor.
+- **Senaryo onayı:** video çizilmeden önce kancayı seçer (ya da kendin yazarsın), istersen tek cümle kendi
+  yorumunu eklersin ("BENCE" sahnesi olarak girer), anlatımı düzeltirsin.
+- **📚 Seri planla:** temadan birbirinden gerçekten farklı bölümler (farklı konu, farklı anlatım açısı) önerilir;
+  yapılan bölümler işaretlenir, başlıkta "Bölüm N" yazar. Ollama gerekir.
+- **Üretim kaydı:** her video klasöründe `uretim_kaydi.json` (adımların zamanı, kararların) ve
+  `plan_yapayzeka.json` (yapay zekânın ilk hali) saklanır; itiraz gerekirse kanıttır.
+- `youtube.txt`: Shorts başlığı (#shorts, 100 karakter), açıklama, kaynaklar, etiketler ve "değiştirilmiş ya da
+  yapay içerik" sorusunun cevabı.
+
+**Daha kaliteli görüntü ve müzik (ücretsiz):** Ayarlar'a Pexels ve Pixabay API anahtarlarını yapıştırırsan HD
+(Shorts'ta dikey) stok videolar kullanılır. Ayarlar > **Müzik klasörü**ne YouTube Studio > Ses Kitaplığı'ndan
+indirdiğin parçaları koyarsan (ruh haline göre alt klasörler) programın ürettiği müzik yerine onlar çalar; her
+videoda en az kullanılan seçilir, atıf metni `parca.txt`'den açıklamaya eklenir.
+
 **Basit mod (açılışta):** tek kutuya nasıl bir video istediğini yaz, **▶ VİDEOYU YAP**'a bas. Program
 yazdığından stili, müziği, tempoyu, süreyi, formatı (Shorts, Instagram), dili, sesi ve rengi kendisi seçer,
 seçtiklerini kutunun altında gösterir; araştırma, senaryo ve video kendiliğinden art arda yapılır.
@@ -67,6 +88,7 @@ Gelişmiş modda:
 
 ```
 python -m promptvideo "Türkiye'nin nüfusu 1960'tan bugüne nasıl değişti?"
+python -m promptvideo "Kahvenin dünyaya yayılışı" --shorts      # gerçek dikey Shorts
 ```
 
 Stiller: `mekanik` (varsayılan, siyah-turuncu), `modern`, `belgesel`, `haber`, `minimal`, `cizgi` (kâğıt üstüne
@@ -137,6 +159,8 @@ lab, nature), `versus`, `people` (piktogram), `map` (`world` ya da `turkey`), `t
 | `PV_VOICE` | `tr-TR-AhmetNeural` | Ses |
 | `PV_PRESET` / `PV_CRF` | `medium` / `19` | Kodlama hızı / kalitesi (düşük CRF = daha kaliteli, büyük dosya) |
 | `PV_NO_SPLASH` / `PV_SPLASH_MUTE` | boş | `1` yapılırsa açılış efekti hiç gösterilmez / sessiz oynar |
+| `PEXELS_API_KEY` / `PIXABAY_API_KEY` | boş | Ücretsiz HD stok video anahtarları |
+| `PV_MUSIC_DIR` | boş | Gerçek müzik klasörü (uygulamada kayıt klasörü/Muzik) |
 | `PV_STYLE` | `mekanik` | Komut satırındaki varsayılan görünüm (`mekanik` / `cizgi` / `modern`); `--style` ile de seçilir |
 
 ## Sınırlar

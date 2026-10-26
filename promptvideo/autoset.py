@@ -6,7 +6,7 @@ uygun görünüm ve müzik seçilir. İnternetsiz ve anında çalışır.
 """
 import re
 
-DEFAULTS = dict(kind="infografik", style="mekanik", accent="", bg="", quality="1080", fps="30", tempo="normal", vertical="0",
+DEFAULTS = dict(kind="infografik", style="mekanik", accent="", bg="", quality="1080", fps="30", tempo="normal", vertical="2",
                 square="0", subs="1", sub_size="orta", sub_pos="alt", sub_box="kutu", voice="tr-TR-AhmetNeural",
                 music_mode="auto:sakin", music_vol=35, sfx="1", length="orta", lang="tr")
 
@@ -110,10 +110,17 @@ def infer(prompt, kind=None):
 
     # sosyal medya / format
     if _has(t, ("shorts", "short video", "reels", "reel", "tiktok", "tik tok", "dikey")):
-        o.update(vertical="1", length="kisa", tempo="hizli", sub_size="buyuk", sub_box="vurgu",
+        o.update(vertical="2", length="kisa", tempo="hizli", sub_size="buyuk", sub_box="vurgu",
                  music_mode=o["music_mode"] if topic else "auto:enerjik")
-        why.append("dikey (Shorts/Reels)")
+        why.append("Shorts (gerçek dikey)")
         cut += [r"(youtube\s+)?shorts?\w*", r"reels?\w*", r"tik\s?tok\w*", r"dikey\w*"]
+    elif _has(t, ("yatay", "16:9", "youtube videosu", "uzun video", "normal video")):
+        o["vertical"] = "0"
+        why.append("yatay 16:9")
+        cut += [r"yatay\w*", r"16:9", r"(youtube|uzun|normal) videosu?\w*"]
+    elif o["vertical"] == "2":  # varsayılan: Shorts
+        o.update(length="kisa", tempo="hizli", sub_size="buyuk", sub_box="vurgu")
+        why.append("Shorts (varsayılan)")
     if _has(t, ("instagram", "kare format", "kare video", "1:1")):
         o["square"] = "1"
         why.append("kare (Instagram)")

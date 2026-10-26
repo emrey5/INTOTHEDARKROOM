@@ -73,11 +73,26 @@ Yalnızca şu şemaya uyan JSON döndür:
 LENGTHS = {"kisa": ("4-5", 5), "orta": ("6-9", 9), "uzun": ("10-14", 14)}
 
 
-def system_prompt(length="orta", kind=None):
+SHORTS_HINT = """BU VİDEO BİR YOUTUBE SHORTS (dikey, 20-45 saniye). Bu kurallar diğer bütün kurallardan önce gelir:
+- 5-7 sahne. Her "narration" TEK kısa cümle (en fazla 14 kelime). Sayıları rakamla yaz.
+- 1. sahne "title" ve KANCA: "narration" izleyiciyi ilk saniyede durduran tek cümle (en fazla 10 kelime):
+  şaşırtıcı bir sayı, merak uyandıran bir soru ya da ters köşe bir iddia. "Merhaba", "bu videoda" YOK.
+- Planın kökünde "hooks": birbirinden farklı 3 kanca cümlesi (biri sayıyla, biri soru, biri iddia);
+  ilki 1. sahnenin anlatımıyla aynı.
+- Son sahne "outro": anlatımı videonun başına bağlansın, izleyici döngüde tekrar izlesin (ör. kanca bir
+  soruysa son cümle o soruya geri götürsün). "Abone ol", "beğen" DEME.
+- Görsel sahneleri tercih et: "video", "image", "stat", "kinetic"; "table" KULLANMA; grafiklerde en fazla 5 veri.
+- "stock_query" ve "image_query" somut, görsel ve İngilizce olsun (ör. "crowded istanbul street").
+- Videonun bir bakış açısı olsun: sadece bilgi sıralama, bir şeyi neden önemli olduğunu söyle."""
+
+
+def system_prompt(length="orta", kind=None, shorts=False):
     from .kinds import KINDS
     s = SYSTEM_T.replace("{n_scenes}", LENGTHS.get(length, LENGTHS["orta"])[0])
     if kind in KINDS:  # video türünün talimatı genel kuralların önüne geçer
         s += "\n\nVİDEO TÜRÜ (diğer kurallardan önce gelir): " + KINDS[kind]["hint"]
+    if shorts:
+        s += "\n\n" + SHORTS_HINT
     return s
 
 
@@ -97,12 +112,12 @@ def ollama_available():
         return False, []
 
 
-def plan_with_ollama(prompt, findings, lang="tr", log=print, length="orta", kind=None):
+def plan_with_ollama(prompt, findings, lang="tr", log=print, length="orta", kind=None, shorts=False):
     log(f"  [ollama] {MODEL} senaryoyu yazıyor (birkaç dakika sürebilir)…")
     r = requests.post(f"{OLLAMA}/api/chat", timeout=1800, json={
         "model": MODEL, "stream": False, "format": "json", "think": False,
         "options": {"temperature": 0.4, "num_ctx": 16384},
-        "messages": [{"role": "system", "content": system_prompt(length, kind)},
+        "messages": [{"role": "system", "content": system_prompt(length, kind, shorts)},
                      {"role": "user", "content": f"İSTEK: {prompt}\n\nARAŞTIRMA NOTLARI:\n{R.notes(findings)}"}]})
     r.raise_for_status()
     plan = extract_json(r.json()["message"]["content"])
@@ -268,13 +283,111 @@ def _fmt(v, unit):
     return f"{s} {unit}".strip()
 
 
-def make_plan(prompt, lang="tr", log=print, length="orta", findings=None, kind=None):
+def make_plan(prompt, lang="tr", log=print, length="orta", findings=None, kind=None, shorts=False):
     """Senaryoyu yazar ve video türüne uydurur. findings verilmezse önce araştırma yapılır."""
     from .kinds import apply
-    return apply(_make_plan(prompt, lang, log, length, findings, kind), kind, prompt)
+    plan = apply(_make_plan(prompt, lang, log, length, findings, kind, shorts), kind, prompt)
+    return shortify(plan, prompt, lang) if shorts else plan
 
 
-def _make_plan(prompt, lang="tr", log=print, length="orta", findings=None, kind=None):
+def _sentence1(text, max_words=18):
+    t = str(text or "").strip()
+    m = re.match(r"(.+?[.!?])(\s|$)", t)
+    t = m.group(1) if m else t
+    w = t.split()
+    return " ".join(w[:max_words]).rstrip(",;:") + ("…" if len(w) > max_words else "")
+
+
+def fallback_hooks(plan, lang="tr"):
+    """Yapay zekâ kanca yazmadıysa: sayıdan, sorudan ve iddiadan üç kanca."""
+    title = plan.get("title") or ""
+    stat = next((sc for sc in plan.get("scenes", []) if sc.get("type") == "stat" and sc.get("value") is not None), None)
+    if lang == "en":
+        hooks = [f"Did you know this about {title}?", f"Everything you know about {title} is wrong."]
+        if stat:
+            hooks.insert(0, f"{stat.get('prefix', '')}{stat['value']}{stat.get('suffix', '')}. And that's not even the crazy part.")
+    else:
+        hooks = [f"{title} hakkında bunu biliyor muydun?", f"{title}: çoğu kişinin yanlış bildiği gerçek."]
+        if stat:
+            from .theme import fmt_num
+            num = stat.get("prefix", "") + fmt_num(stat["value"], "tr") + stat.get("suffix", "")
+            hooks.insert(0, f"{num} {stat.get('label') or ''}".strip() + ". Ama asıl şaşırtıcı olan bu değil.")
+    return hooks[:3]
+
+
+def shortify(plan, prompt, lang="tr"):
+    """Planı Shorts'a uydurur: 5-7 sahne, tek cümlelik anlatım, başta kanca, sonda döngü."""
+    from .kinds import _to_kinetic
+    sc = [s for s in plan.get("scenes", []) if s]
+    if not sc:
+        return plan
+    hooks = [h for h in plan.get("hooks") or [] if isinstance(h, str) and h.strip()]
+    ai_hooks = bool(hooks)  # yapay zekâ Shorts kurallarıyla yazdıysa kapanışı da döngüye göre yazmıştır
+    if len(hooks) < 3:
+        hooks += [h for h in fallback_hooks(plan, lang) if h not in hooks]
+    hooks = hooks[:3]
+    first = sc[0] if sc[0].get("type") == "title" else {"type": "title", "title": plan.get("title", "")}
+    first["narration"] = hooks[0]
+    last = sc[-1] if sc[-1].get("type") == "outro" and len(sc) > 1 else {"type": "outro", "title": plan.get("title", "")}
+    middle = [s for s in sc[1:] if s is not last and s.get("type") not in ("title", "outro")]
+    prio = {"video": 0, "image": 0, "stat": 1, "kinetic": 1, "versus": 2, "compare": 2, "map": 2, "bar": 3,
+            "people": 3, "line": 3, "character": 4, "timeline": 4, "pie": 5, "bullets": 6, "table": 9}
+    keep = sorted(sorted(range(len(middle)), key=lambda i: (prio.get(middle[i].get("type"), 7), i))[:5])
+    middle = [middle[i] for i in keep]
+    for i, s in enumerate(middle):
+        if s.get("type") == "table":
+            middle[i] = s = _to_kinetic(s)
+        if s.get("narration"):
+            s["narration"] = _sentence1(s["narration"])
+        for k in ("data",):  # grafiklerde en fazla 5 veri: telefonda okunur kalsın
+            if isinstance(s.get(k), list) and len(s[k]) > 5:
+                s[k] = s[k][:5]
+    if not ai_hooks or not last.get("narration") or len(last["narration"].split()) > 20:
+        last["narration"] = ("Şimdi bir daha düşün:" if lang != "en" else "Now think about it again:")
+    plan["scenes"] = [first] + middle + [last]
+    plan["hooks"], plan["hook"], plan["shorts"] = hooks, hooks[0], True
+    return plan
+
+
+SERIES_SYSTEM = """Sen YouTube Shorts için bilgi serileri planlayan bir yapımcısın. Kullanıcı bir seri teması verir.
+{n} bölüm öner. Kurallar:
+- Her bölüm GERÇEKTEN farklı bir konu olsun (aynı şablonda yalnızca isim değiştirmek YASAK; YouTube bunu
+  seri üretim sayıp kanalı cezalandırır). Konular araştırılabilir, gerçek ve sayılarla anlatılabilir olsun.
+- Her bölümün "angle"ı farklı bir anlatım biçimi olsun: karşılaştırma, zaman yolculuğu, tek çarpıcı sayı,
+  yaygın bir yanlışı düzeltme, "ya olmasaydı", sıralama, neden-sonuç...
+- "hook": ilk saniyede izleyiciyi durduracak tek cümle (en fazla 10 kelime).
+- "title": kısa, araştırılabilir konu (Türkçe, en fazla 60 karakter).
+Yalnızca şu JSON'u döndür: {{"series": "serinin adı", "episodes": [{{"title": "...", "angle": "...", "hook": "..."}}]}}"""
+
+
+def series_ideas(theme, n=10, lang="tr", log=print):
+    """Seri planlayıcı: temadan birbirinden farklı n bölüm önerir (Ollama gerekir)."""
+    ok, names = ollama_available()
+    if not names:
+        from . import ollama_setup
+        if ollama_setup.find_exe() and ollama_setup.start_server():
+            ok, names = ollama_available()
+    if not ok:
+        raise RuntimeError("Seri planlayıcı için yerel yapay zekâ (Ollama) gerekli. Gelişmiş moddaki "
+                           "“Ollama'yı kur ve hazırla” düğmesiyle tek tıkla kurulur.")
+    r = requests.post(f"{OLLAMA}/api/chat", timeout=900, json={
+        "model": MODEL, "stream": False, "format": "json", "think": False, "options": {"temperature": 0.8},
+        "messages": [{"role": "system", "content": SERIES_SYSTEM.format(n=n)},
+                     {"role": "user", "content": f"SERİ TEMASI: {theme}\nDİL: {lang}"}]})
+    r.raise_for_status()
+    data = extract_json(r.json()["message"]["content"])
+    eps = [e for e in data.get("episodes", []) if isinstance(e, dict) and e.get("title")]
+    seen, out = set(), []
+    for e in eps:  # aynı konu iki kez gelmesin
+        key = re.sub(r"\W", "", e["title"].lower())
+        if key not in seen:
+            seen.add(key)
+            out.append({"title": e["title"].strip(), "angle": (e.get("angle") or "").strip(),
+                        "hook": (e.get("hook") or "").strip(), "done": False})
+    return {"series": (data.get("series") or theme).strip(), "theme": theme, "episodes": out[:n]}
+
+
+def _make_plan(prompt, lang="tr", log=print, length="orta", findings=None, kind=None, shorts=False):
     if findings is None:
         findings = R.gather(prompt, lang, log)
     ok, names = ollama_available()
@@ -285,7 +398,7 @@ def _make_plan(prompt, lang="tr", log=print, length="orta", findings=None, kind=
     if ok:
         log(f"Yerel yapay zekâ ({MODEL}) senaryoyu yazıyor…")
         try:
-            plan = plan_with_ollama(prompt, findings, lang, log, length, kind)
+            plan = plan_with_ollama(prompt, findings, lang, log, length, kind, shorts)
             if plan.get("scenes"):
                 return plan
         except Exception as e:

@@ -50,7 +50,9 @@ def _key_stat(sc_list):
     return None, None
 
 
-def youtube_text(plan, sc_list, path):
+def youtube_text(plan, sc_list, path, shorts=False):
+    if shorts:
+        return shorts_text(plan, sc_list, path)
     title = plan.get("title", "")
     narr = [sc.get("narration", "") for sc in sc_list if sc.get("narration")]
     desc = " ".join(narr[:3])
@@ -67,7 +69,51 @@ def youtube_text(plan, sc_list, path):
         lines += ["Bölümler:"] + [f"{_ts(t)} {lab}" for t, lab in ch] + [""]
     if srcs:
         lines += ["Kaynaklar:"] + [f"• {s}" for s in srcs] + [""]
+    if plan.get("music_credit"):
+        lines += ["Müzik: " + plan["music_credit"], ""]
     lines += ["DARKROOM ile hazırlandı.", "", "ETİKETLER", ", ".join(tags)]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return path
+
+
+def _hashtag(w):
+    return "#" + re.sub(r"[^\wçğıöşüÇĞİÖŞÜ]", "", w.title())
+
+
+def shorts_text(plan, sc_list, path):
+    """Shorts için başlık (≤100 karakter, #shorts), kısa açıklama, seri bilgisi, kaynaklar, etiketler ve
+    YouTube'daki "değiştirilmiş ya da yapay içerik" sorusunun cevabı."""
+    series = plan.get("series") or {}
+    title = (plan.get("hook") or plan.get("title") or "").strip()
+    if series.get("label"):
+        title = f"{title} | {series['label']}"
+    words = re.findall(r"[\wçğıöşüÇĞİÖŞÜ]{4,}", " ".join([plan.get("title", "")] + [sc.get("kicker", "") for sc in sc_list]))
+    tags = list(dict.fromkeys(w.lower() for w in words))[:12]
+    hashtags = [_hashtag(w) for w in tags[:3]]
+    full = f"{title} #shorts"
+    if len(full) > 100:
+        full = title[:100 - 8].rstrip() + "… #shorts"
+    narr = [sc.get("narration", "") for sc in sc_list if sc.get("narration")]
+    srcs = []
+    for sc in sc_list:
+        for s in ([sc.get("source")] if sc.get("source") else []) + list(sc.get("sources") or []) + \
+                 ([sc.get("credit")] if sc.get("credit") else []):
+            if s and s not in srcs:
+                srcs.append(s)
+    lines = [f"BAŞLIK (Shorts, {len(full)}/100 karakter)", full, "", "AÇIKLAMA", " ".join(narr[:2]), ""]
+    if series.get("name"):
+        lines += [f"📚 Seri: {series['name']} · {series.get('label', '')}", ""]
+    if plan.get("review", {}).get("opinion"):
+        lines += [f"Benim yorumum: {plan['review']['opinion']}", ""]
+    if srcs:
+        lines += ["Kaynaklar:"] + [f"• {s}" for s in srcs] + [""]
+    if plan.get("music_credit"):
+        lines += ["Müzik: " + plan["music_credit"], ""]
+    lines += [" ".join(hashtags + ["#shorts", "#bilgi"]), "", "ETİKETLER", ", ".join(tags + ["shorts", "bilgi"]), "",
+              "YÜKLERKEN", "• \"Değiştirilmiş ya da yapay içerik\" sorusu: HAYIR. Videoda gerçek gibi görünen yapay "
+              "insan ya da olay yok; grafikler, stok görüntüler ve yapay zekâ seslendirmesi bu etiketi gerektirmez.",
+              "• Yükleme sıklığı: aynı seriden günde en fazla 1-2 video; her bölümün konusu gerçekten farklı olsun."]
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return path
