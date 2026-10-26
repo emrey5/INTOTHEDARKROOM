@@ -3,7 +3,9 @@
 - Efektler (whoosh, pop, tık, bloop, ding) her sahnenin animasyon zamanlarına göre yerleştirilir.
 - Müzik, seçilen havaya göre (enerjik / sakin / gizemli) video süresi kadar üretilir.
 """
+import json
 import math
+import os
 import wave
 
 import numpy as np
@@ -257,3 +259,66 @@ def _write(path, mono):
         w.setsampwidth(2)
         w.setframerate(SR)
         w.writeframes(stereo.tobytes())
+
+
+MUSIC_EXT = (".mp3", ".wav", ".m4a", ".ogg", ".flac")
+MUSIC_README = """DARKROOM MÜZİK KLASÖRÜ
+
+Buraya koyduğun gerçek müzikler, programın kendi ürettiği müziğin yerine kullanılır.
+Ruh haline göre alt klasörlere koy: enerjik, sakin, gizemli, epik, gerilim (ya da doğrudan bu klasöre).
+Program her videoda en az kullanılan parçayı seçer, böylece videolar birbirine benzemez.
+
+Kanalın için en güvenli kaynak: YouTube Studio > Ses Kitaplığı (Audio Library). Oradaki parçalar
+YouTube'da ücretsiz ve telif talebi almadan kullanılabilir. "Atıf gerekli" yazanların atıf metnini
+parçayla aynı adlı bir .txt dosyasına yaz (ör. parca.mp3 -> parca.txt); açıklamaya kendiliğinden eklenir.
+"""
+
+
+def ensure_library(folder):
+    """Müzik klasörünü ve alt klasörlerini oluşturur (yoksa)."""
+    try:
+        for m in ("enerjik", "sakin", "gizemli", "epik", "gerilim"):
+            os.makedirs(os.path.join(folder, m), exist_ok=True)
+        readme = os.path.join(folder, "BENIOKU.txt")
+        if not os.path.exists(readme):
+            with open(readme, "w", encoding="utf-8") as f:
+                f.write(MUSIC_README)
+    except OSError:
+        pass
+    return folder
+
+
+def pick_library(mood, folder):
+    """Klasördeki gerçek müziklerden ruh haline uygun, en az kullanılmış parçayı seçer: (yol, atıf) ya da (None, None)."""
+    if not folder or not os.path.isdir(folder):
+        return None, None
+    cands = []
+    for d in (os.path.join(folder, mood), folder):
+        if os.path.isdir(d):
+            cands = [os.path.join(d, f) for f in sorted(os.listdir(d)) if f.lower().endswith(MUSIC_EXT)]
+            if cands:
+                break
+    if not cands:  # bu ruh hali için parça yoksa klasördeki herhangi bir parça
+        for root, _, files in os.walk(folder):
+            cands += [os.path.join(root, f) for f in sorted(files) if f.lower().endswith(MUSIC_EXT)]
+    if not cands:
+        return None, None
+    used_p = os.path.join(folder, ".kullanim.json")
+    try:
+        with open(used_p, encoding="utf-8") as f:
+            used = json.load(f)
+    except Exception:
+        used = {}
+    path = min(cands, key=lambda p: (used.get(os.path.basename(p), 0), p))
+    used[os.path.basename(path)] = used.get(os.path.basename(path), 0) + 1
+    try:
+        with open(used_p, "w", encoding="utf-8") as f:
+            json.dump(used, f, ensure_ascii=False)
+    except OSError:
+        pass
+    credit = None
+    side = os.path.splitext(path)[0] + ".txt"
+    if os.path.isfile(side):
+        with open(side, encoding="utf-8") as f:
+            credit = f.read().strip() or None
+    return path, credit

@@ -67,6 +67,8 @@ def fetch_media(sc, assets):
             if q:
                 url, credit = W.pexels_video(q)  # PEXELS_API_KEY (ücretsiz) varsa
                 if not url:
+                    url, credit = W.pixabay_video(q)  # PIXABAY_API_KEY (ücretsiz) varsa
+                if not url:
                     url, credit = W.commons_video(q)
             if url:
                 ext = os.path.splitext(url.split("?")[0])[1] or ".mp4"
@@ -131,7 +133,7 @@ def load_findings(out_dir):
     return None
 
 
-def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta", kind=None):
+def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta", kind=None, shorts=False):
     """Seçili bulgulardan senaryoyu yazar, sayıları doğrular, out_dir/plan.json olarak kaydeder."""
     global _cb
     _cb = cb or Callbacks()
@@ -139,7 +141,7 @@ def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta", kin
     from .factcheck import check_plan
     os.makedirs(out_dir, exist_ok=True)
     _cb.stage(1, 5, "Senaryo yazılıyor")
-    plan = make_plan(prompt, lang, log, length, findings, kind)
+    plan = make_plan(prompt, lang, log, length, findings, kind, shorts)
     plan.setdefault("prompt", prompt)
     chk = check_plan(plan, findings)
     if chk:
@@ -149,23 +151,30 @@ def write_plan(prompt, findings, out_dir, lang="tr", cb=None, length="orta", kin
                 log(f"  ⚠ Sahne {i + 1}: kaynakta yok → {', '.join(sc['check']['missing'])}")
     with open(os.path.join(out_dir, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, ensure_ascii=False, indent=2)
+    with open(os.path.join(out_dir, "plan_yapayzeka.json"), "w", encoding="utf-8") as f:  # düzenlemeden önceki hali
+        json.dump(plan, f, ensure_ascii=False, indent=2)
+    write_log(out_dir, "senaryo", {"istek": prompt, "tur": kind, "shorts": shorts, "sahne": len(plan.get("scenes", [])),
+                                   "kaynak_sayisi": len(findings or []), "kancalar": plan.get("hooks")})
     log(f"Plan kaydedildi: {os.path.join(out_dir, 'plan.json')} ({len(plan.get('scenes', []))} sahne)")
     return plan
 
 
-def create_plan(prompt, out_dir, lang="tr", cb=None, length="orta", kind=None):
+def create_plan(prompt, out_dir, lang="tr", cb=None, length="orta", kind=None, shorts=False):
     """Araştırma + senaryo tek adımda (komut satırı için)."""
     findings = research_topic(prompt, out_dir, lang, cb)
-    return write_plan(prompt, findings, out_dir, lang, cb, length, kind)
+    return write_plan(prompt, findings, out_dir, lang, cb, length, kind, shorts)
 
 
 def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=False, lang="tr", cb=None,
                 preview_every=10, subtitles=False, sfx=True, vertical=False, square=False, quality="1080",
-                fps=30, tempo="normal", accent=None, bg=None, sub_opts=None, music_vol=0.35):
+                fps=30, tempo="normal", accent=None, bg=None, sub_opts=None, music_vol=0.35, shorts=False,
+                review=None):
     """Planı videoya çevirir; video yolunu döner.
     music: ses dosyası yolu ya da "auto:enerjik" / "auto:sakin" / "auto:gizemli" (program üretir).
     quality: "720" / "1080" / "1440" / "2160"; tempo: "yavas" / "normal" / "hizli";
-    accent / bg: "#RRGGBB" ile stil renklerini değiştirir; sub_opts: altyazı boyut/konum/kutu."""
+    accent / bg: "#RRGGBB" ile stil renklerini değiştirir; sub_opts: altyazı boyut/konum/kutu.
+    shorts: video baştan dikey (1080x1920) çizilir, kelime kelime altyazı, hızlı kurgu (shorts.py).
+    review: kullanıcının onay ekranındaki seçimleri (üretim kaydına yazılır)."""
     global _cb
     _cb = cb or Callbacks()
     from . import theme
@@ -176,7 +185,14 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
     D._paper = None  # stil değişince kâğıt dokusunu yeniden üret
     D.SUB_OPTS = dict(D.SUB_OPTS, **(sub_opts or {}))
     rate, pad, min_k = TEMPO.get(tempo, TEMPO["normal"])
-    ow, oh = theme.out_size()
+    if shorts:
+        from . import shorts as SH
+        SH.setup_fonts()
+        pad, min_k = min(pad, 0.35), 0.45  # Shorts'ta sahneler hızlı akar
+        W.ORIENTATION = "portrait"
+    else:
+        W.ORIENTATION = "landscape"
+    ow, oh = SH.out_size() if shorts else theme.out_size()
     log(f"Çıktı: {ow}x{oh}, {theme.FPS} fps, stil {theme.STYLE_NAMES.get(theme.STYLE, theme.STYLE)}")
     lang = plan.get("language", lang)
     scenes.LANG = lang
@@ -195,7 +211,7 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
     for i, sc in enumerate(sc_list):
         if _cb.cancelled():
             raise Cancelled()
-        audio = None
+        audio, words = None, []
         if sc["type"] == "character" and not sc.get("narration"):  # anlatım yoksa balondaki replikler okunur
             sc["narration"] = " ".join(x.get("text", "") for x in _say_lines(sc))
         lines = _say_lines(sc) if sc["type"] == "character" else []
@@ -213,10 +229,16 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
                 except Exception as e:
                     log(f"  [ses] replikler birleştirilemedi: {e}")
         elif not no_voice and sc.get("narration"):
-            audio = tts.synthesize(sc["narration"], os.path.join(assets, f"voice_{i:02}.mp3"), lang, voice, rate)
+            if shorts:  # kelime zamanlarıyla: altyazı sesle birebir gider
+                audio, words = tts.synthesize_words(sc["narration"], os.path.join(assets, f"voice_{i:02}.mp3"),
+                                                    lang, voice, rate)
+            else:
+                audio = tts.synthesize(sc["narration"], os.path.join(assets, f"voice_{i:02}.mp3"), lang, voice, rate)
         sc["_audio"] = audio
         alen = tts.duration(audio) if audio else 0
         sc["_speech"], sc["_subs"] = alen, subtitles
+        if shorts:
+            SH.prepare(sc, words)
         sc["duration"] = max(float(sc.get("duration") or 0), MIN_DUR.get(sc["type"], 6) * min_k, alen + pad)
         _cb.progress((i + 1) / len(sc_list))
 
@@ -237,7 +259,11 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
     for i, sc in enumerate(sc_list):
         p = os.path.join(assets, f"scene_{i:02}.mp4")
         log(f"[{i + 1}/{len(sc_list)}] {sc['type']} · {sc['duration']:.1f} sn · {sc.get('title') or sc.get('caption') or ''}")
-        render_scene(sc, p, off, total, i, len(sc_list), sc.get("_audio"), on_frame)
+        if shorts:
+            SH.render_scene(sc, p, off, total, i, len(sc_list), sc.get("_audio"), on_frame, lang,
+                            (plan.get("series") or {}).get("label"))
+        else:
+            render_scene(sc, p, off, total, i, len(sc_list), sc.get("_audio"), on_frame)
         if sc.get("narration"):
             srt.append(f"{len(srt) + 1}\n{srt_time(off + 0.3)} --> {srt_time(off + sc['duration'] - 0.5)}\n{sc['narration']}\n")
         parts.append(p)
@@ -252,22 +278,30 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
         sfx_path = A.build_sfx(events, total, os.path.join(assets, "efektler.wav"), cuts[:-1])
     if music and music.startswith("auto:"):
         mood = music.split(":", 1)[1]
-        log(f"Müzik üretiliyor ({A.MOODS.get(mood, mood)})…")
-        music = A.build_music(mood, total, os.path.join(assets, "muzik.wav"))
+        track, credit = A.pick_library(mood, os.environ.get("PV_MUSIC_DIR"))  # kullanıcının gerçek müzikleri
+        if track:
+            log(f"Müzik: {os.path.basename(track)} (müzik klasöründen)")
+            music = track
+            if credit:
+                plan["music_credit"] = credit
+        else:
+            log(f"Müzik üretiliyor ({A.MOODS.get(mood, mood)})… Gerçek müzik için müzik klasörüne YouTube Ses "
+                "Kitaplığı'ndan parçalar koyabilirsin (Ayarlar > Müzik klasörü).")
+            music = A.build_music(mood, total, os.path.join(assets, "muzik.wav"))
     concat(parts, out, music, sfx_path, music_vol)
     with open(os.path.join(out_dir, "altyazi.srt"), "w", encoding="utf-8") as f:
         f.write("\n".join(srt))
     from . import publish
     try:
         publish.thumbnail(plan, sc_list, os.path.join(out_dir, "kapak.png"))
-        publish.youtube_text(plan, sc_list, os.path.join(out_dir, "youtube.txt"))
+        publish.youtube_text(plan, sc_list, os.path.join(out_dir, "youtube.txt"), shorts)
         log("Kapak resmi (kapak.png) ve YouTube metinleri (youtube.txt) hazır.")
     except Exception as e:
         log(f"  [yayın paketi] {e}")
-    if vertical:
+    if vertical and not shorts:
         log("Dikey (Shorts) sürüm hazırlanıyor…")
         publish.vertical(out, os.path.join(out_dir, "video_dikey.mp4"), plan.get("title", ""))
-    if square:
+    if square and not shorts:
         log("Kare (1:1) sürüm hazırlanıyor…")
         publish.square(out, os.path.join(out_dir, "video_kare.mp4"), plan.get("title", ""))
     for p in parts:
@@ -275,5 +309,25 @@ def render_plan(plan, out_dir, style=None, voice=None, music=None, no_voice=Fals
             os.remove(p)
         except OSError:
             pass
+    write_log(out_dir, "video", {"dosya": out, "sure_sn": round(total, 1), "format": "Shorts 9:16" if shorts else "16:9",
+                                 "uretim_suresi_sn": round(time.time() - t0), "inceleme": review or plan.get("review"),
+                                 "kaynaklar": sorted({s for sc in sc_list for s in [sc.get("source"), sc.get("credit")] if s})})
     log(f"Bitti: {out} ({total:.0f} sn video, {time.time() - t0:.0f} sn sürdü)")
     return out
+
+
+def write_log(out_dir, step, data):
+    """Üretim kaydı (uretim_kaydi.json): her adımın zamanı ve kullanıcının kararları. YouTube bir gün
+    "seri üretim" diye sorarsa videonun nasıl hazırlandığının kanıtı olur."""
+    p = os.path.join(out_dir, "uretim_kaydi.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            rec = json.load(f)
+    except Exception:
+        rec = {"program": "DARKROOM", "adimlar": []}
+    rec["adimlar"].append({"adim": step, "zaman": time.strftime("%Y-%m-%d %H:%M:%S"), **(data or {})})
+    try:
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(rec, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass

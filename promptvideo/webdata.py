@@ -347,20 +347,46 @@ def commons_video(query, max_mb=150):
     return None, None
 
 
+ORIENTATION = "landscape"  # Shorts'ta "portrait": dikey çekilmiş stok görüntüler tercih edilir
+
+
+def pixabay_video(query, min_dur=4):
+    """Pixabay'den HD stok video URL'si (PIXABAY_API_KEY gerekir, ücretsiz; atıf zorunlu değil)."""
+    key = os.environ.get("PIXABAY_API_KEY")
+    if not key:
+        return None, None
+    try:
+        r = S.get("https://pixabay.com/api/videos/", params={"key": key, "q": query[:100], "per_page": 10,
+                                                            "safesearch": "true"}, timeout=20)
+        r.raise_for_status()
+        hits = [h for h in r.json().get("hits", []) if h.get("duration", 0) >= min_dur]
+        portrait = ORIENTATION == "portrait"
+        hits.sort(key=lambda h: ((h["videos"].get("large") or h["videos"]["medium"]).get("height", 0) >
+                                 (h["videos"].get("large") or h["videos"]["medium"]).get("width", 1)) != portrait)
+        for h in hits:
+            for size in ("large", "medium"):
+                v = h["videos"].get(size) or {}
+                if v.get("url") and max(v.get("width", 0), v.get("height", 0)) >= 1280:
+                    return v["url"], f"Video: {h.get('user', 'Pixabay')} / Pixabay"
+    except Exception as e:
+        print(f"  [pixabay] {e}")
+    return None, None
+
+
 def pexels_video(query, min_dur=4):
-    """Pexels'ten yatay HD stok video URL'si (PEXELS_API_KEY gerekir, ücretsiz)."""
+    """Pexels'ten HD stok video URL'si (PEXELS_API_KEY gerekir, ücretsiz). Shorts'ta dikey çekimler."""
     key = os.environ.get("PEXELS_API_KEY")
     if not key:
         return None, None
     r = S.get("https://api.pexels.com/videos/search", headers={"Authorization": key},
-              params={"query": query, "orientation": "landscape", "size": "medium", "per_page": 8},
+              params={"query": query, "orientation": ORIENTATION, "size": "medium", "per_page": 8},
               timeout=20)
     r.raise_for_status()
     for v in r.json().get("videos", []):
         if v.get("duration", 0) < min_dur:
             continue
-        files = sorted((f for f in v["video_files"] if f.get("width") and f["width"] >= 1280),
-                       key=lambda f: abs(f["width"] - 1920))
+        files = sorted((f for f in v["video_files"] if f.get("width") and max(f["width"], f.get("height") or 0) >= 1280),
+                       key=lambda f: abs(max(f["width"], f.get("height") or 0) - 1920))
         if files:
             return files[0]["link"], f"Video: {v['user']['name']} / Pexels"
     return None, None
@@ -371,7 +397,7 @@ def pexels_photo(query):
     if not key:
         return None, None
     r = S.get("https://api.pexels.com/v1/search", headers={"Authorization": key},
-              params={"query": query, "orientation": "landscape", "per_page": 3}, timeout=20)
+              params={"query": query, "orientation": ORIENTATION, "per_page": 3}, timeout=20)
     r.raise_for_status()
     ph = r.json().get("photos", [])
     if ph:

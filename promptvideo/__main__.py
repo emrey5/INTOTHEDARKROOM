@@ -21,6 +21,8 @@ def main(argv=None):
     ap.add_argument("--no-sfx", action="store_true", help="Ses efektlerini kapat")
     ap.add_argument("--vertical", action="store_true", help="Ayrıca 9:16 dikey (Shorts) sürüm üret")
     ap.add_argument("--plan-only", action="store_true", help="Sadece planı oluştur, videoyu çizme")
+    ap.add_argument("--shorts", action="store_true",
+                    help="YouTube Shorts: baştan dikey 1080x1920, kanca, kelime kelime altyazı, hızlı kurgu")
     ap.add_argument("--square", action="store_true", help="Ayrıca 1:1 kare sürüm üret")
     ap.add_argument("--kind", choices=["gercekci", "cizgi", "infografik", "haber", "kinetik", "karakter", "piksel"],
                     help="Video türü (senaryo ve görünüm buna göre)")
@@ -44,12 +46,12 @@ def main(argv=None):
         with open(a.plan, encoding="utf-8") as f:
             plan = json.load(f)
     else:
-        plan = create_plan(a.prompt, a.out, a.lang, length=a.length, kind=a.kind)
+        plan = create_plan(a.prompt, a.out, a.lang, length=a.length, kind=a.kind, shorts=a.shorts)
         if a.plan_only:
             return
     render_plan(plan, a.out, a.style, a.voice, a.music, a.no_voice, a.lang, subtitles=a.subtitles, sfx=not a.no_sfx,
                 vertical=a.vertical, square=a.square, quality=a.quality, fps=a.fps, tempo=a.tempo,
-                accent=a.accent, bg=a.bg, music_vol=a.music_volume / 100)
+                accent=a.accent, bg=a.bg, music_vol=a.music_volume / 100, shorts=a.shorts)
 
 
 if __name__ == "__main__":

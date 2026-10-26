@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from . import theme, pipeline, planner, scenes, updater, userdata, __version__
 from .waitscreen import WaitScreen
 from . import ollama_setup, autoset, kinds
+from . import audio as AU
 from . import draw as D
 from .render import render_frame
 
@@ -64,7 +65,7 @@ PRESETS = {
                    sub_size="orta", sub_box="vurgu", sfx="1", vertical="0", square="0")),
     "sosyal": ("SOSYAL", "Kısa, hızlı, büyük altyazı, dikey ve kare sürüm",
                dict(style="modern", accent="#FF5CA8", bg="", music_mode="auto:enerjik", tempo="hizli", subs="1",
-                    sub_size="buyuk", sub_box="vurgu", length="kisa", sfx="1", vertical="1", square="1")),
+                    sub_size="buyuk", sub_box="vurgu", length="kisa", sfx="1", vertical="2", square="0")),
     "minimal": ("MİNİMAL", "Açık zemin, tek renk, sade, efektsiz",
                 dict(style="minimal", accent="", bg="", music_mode="auto:sakin", tempo="normal", subs="1",
                      sub_size="orta", sub_box="golge", sfx="0", vertical="0", square="0")),
@@ -78,11 +79,6 @@ PRESETS = {
 STYLE_SAMPLE = {"type": "bar", "kicker": "Örnek", "title": "Stil önizlemesi", "unit": "",
                 "data": [{"label": "Birinci", "value": 9}, {"label": "İkinci", "value": 6}, {"label": "Üçüncü", "value": 4}],
                 "narration": "Altyazı böyle görünecek.", "duration": 8}
-EXAMPLES = [
-    "Türkiye'nin nüfusu 1960'tan bugüne nasıl değişti?",
-    "Avrupa'da enflasyon: Türkiye, Almanya, Fransa karşılaştırması",
-    "Kahvenin dünyaya yayılış hikâyesi",
-]
 SAMPLE_SCENES = {
     "title": {"type": "title", "title": "Örnek Başlık", "subtitle": "Alt başlık burada"},
     "bullets": {"type": "bullets", "kicker": "Öne çıkanlar", "title": "Başlık", "items": ["Birinci madde", "İkinci madde"]},
@@ -293,6 +289,16 @@ def render_still(scene, style, t=None, size=(960, 540), accent="", bg="", subs=N
     return im.resize(size, Image.LANCZOS)
 
 
+def apply_stock_keys(st):
+    """Ayarlardaki ücretsiz stok video anahtarlarını üretim hattına verir."""
+    for key, env in (("pexels_key", "PEXELS_API_KEY"), ("pixabay_key", "PIXABAY_API_KEY")):
+        val = (st.value(key, "") or "").strip()
+        if val:
+            os.environ[env] = val
+        elif env in os.environ and not os.environ[env]:
+            os.environ.pop(env)
+
+
 def slugify(s):
     s = s.lower()
     for a, b in zip("çğıöşüâî", "cgiosuai"):
@@ -361,6 +367,254 @@ class ColorRow(QWidget):
         self.btn_custom.setStyleSheet(f"QToolButton#swatch {{ background: {hexcol}; color: #000000; }}")
 
 
+class ReviewDialog(QDialog):
+    """Video çizilmeden önce senaryonun kısa onayı: kancayı seç, kendi yorumunu ekle, anlatımı düzelt.
+    YouTube'un aradığı "insan kararı" burada verilir ve üretim kaydına yazılır."""
+
+    def __init__(self, win, plan):
+        super().__init__(win)
+        self.plan = plan
+        self.setWindowTitle("Senaryo onayı")
+        self.resize(760, 820)
+        v = QVBoxLayout(self)
+        v.setSpacing(8)
+        v.addWidget(QLabel("▌SENARYO ONAYI", objectName="brand"))
+        info = QLabel("Video çizilmeden önce son bakış. Kancayı seç, istersen tek cümle kendi yorumunu ekle. "
+                      "Senin kararların videoyu seri üretimden ayırır ve üretim kaydına yazılır.", objectName="hint")
+        info.setWordWrap(True)
+        v.addWidget(info)
+        v.addWidget(win._section("İlk saniye: kanca"))
+        self.hook_grp = QButtonGroup(self)
+        hooks = plan.get("hooks") or ([plan["scenes"][0].get("narration")] if plan.get("scenes") else [])
+        for i, h in enumerate(h for h in hooks if h):
+            rb = QCheckBox(h)
+            rb.setProperty("hook", h)
+            rb.setChecked(i == 0)
+            self.hook_grp.addButton(rb)
+            v.addWidget(rb)
+        self.hook_grp.setExclusive(True)
+        self.own_hook = QLineEdit()
+        self.own_hook.setPlaceholderText("…ya da kendi kancanı yaz (boş bırakılırsa seçili olan kullanılır)")
+        v.addWidget(self.own_hook)
+        v.addWidget(win._section("Senin yorumun (isteğe bağlı)"))
+        self.opinion = QLineEdit()
+        self.opinion.setPlaceholderText("ör. Bence asıl şaşırtıcı olan, bunun sadece 20 yılda olması.")
+        v.addWidget(self.opinion)
+        v.addWidget(win._section("Anlatım (düzeltebilirsin)"))
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.NoFrame)
+        box = QWidget()
+        box.setAttribute(Qt.WA_StyledBackground, True)
+        box.setStyleSheet("background: transparent;")
+        area.viewport().setStyleSheet("background: transparent;")
+        bl = QVBoxLayout(box)
+        self.edits = []
+        for i, sc in enumerate(plan.get("scenes", [])[1:], 1):
+            if not sc.get("narration"):
+                continue
+            bl.addWidget(QLabel(f"{i + 1}. {SCENE_TYPES.get(sc.get('type'), sc.get('type'))}", objectName="formlabel"))
+            e = QPlainTextEdit(sc["narration"])
+            e.setFixedHeight(58)
+            bl.addWidget(e)
+            self.edits.append((i, e))
+        bl.addStretch(1)
+        area.setWidget(box)
+        v.addWidget(area, 1)
+        bb = QHBoxLayout()
+        self.result_action = "cancel"
+        for label, act, name in (("▶  VİDEOYU YAP", "render", "primary"), ("AYRINTILI DÜZENLE", "edit", None),
+                                 ("İPTAL", "cancel", None)):
+            b = QPushButton(label, objectName=name) if name else QPushButton(label)
+            b.clicked.connect(lambda _=False, a=act: self._done(a))
+            bb.addWidget(b, 2 if act == "render" else 1)
+        v.addLayout(bb)
+
+    def _done(self, act):
+        self.result_action = act
+        self.accept() if act != "cancel" else self.reject()
+
+    def apply(self):
+        """Seçimleri plana işler; değiştirilen sahne sayısını döner."""
+        plan, sc = self.plan, self.plan["scenes"]
+        b = self.hook_grp.checkedButton()
+        hook = self.own_hook.text().strip() or (b.property("hook") if b else "")
+        changed = 0
+        if hook and sc:
+            if sc[0].get("narration") != hook:
+                changed += 1
+            sc[0]["narration"] = hook
+            plan["hook"] = hook
+        for i, e in self.edits:
+            t = e.toPlainText().strip()
+            if t and t != sc[i].get("narration"):
+                sc[i]["narration"] = t
+                changed += 1
+        op = self.opinion.text().strip()
+        if op:  # kendi yorumun kapanıştan hemen önce, büyük yazıyla
+            pos = len(sc) - 1 if sc and sc[-1].get("type") == "outro" else len(sc)
+            sc.insert(pos, {"type": "kinetic", "kicker": "BENCE" if plan.get("language", "tr") == "tr" else "MY TAKE",
+                            "narration": op, "own": True})
+        plan["review"] = {"hook": hook, "opinion": op, "edited_scenes": changed,
+                          "own_hook": bool(self.own_hook.text().strip()),
+                          "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        return changed
+
+
+class SeriesIdeas(QThread):
+    done = Signal(object, str)
+
+    def __init__(self, theme_text, n, lang):
+        super().__init__()
+        self.theme_text, self.n, self.lang = theme_text, n, lang
+
+    def run(self):
+        try:
+            self.done.emit(planner.series_ideas(self.theme_text, self.n, self.lang), "")
+        except Exception as e:
+            self.done.emit(None, str(e))
+
+
+class SeriesDialog(QDialog):
+    """Seri planlayıcı: tema ver, yapay zekâ birbirinden farklı bölümler önersin; yapılanlar işaretlenir."""
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.win = win
+        self.setWindowTitle("Seri planlayıcı")
+        self.resize(780, 720)
+        self.data, self.path = None, None
+        v = QVBoxLayout(self)
+        v.addWidget(QLabel("▌SERİ PLANLAYICI", objectName="brand"))
+        hint = QLabel("Bir tema ver; her bölüm farklı konu ve farklı anlatım açısıyla önerilir. Aynı şablonda yalnızca "
+                      "isim değiştirmek YouTube'da seri üretim sayılır, bu yüzden her bölüm gerçekten farklıdır.",
+                      objectName="hint")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+        h = QHBoxLayout()
+        self.existing = QComboBox()
+        self.existing.addItem("— yeni seri —", "")
+        for f in sorted(os.listdir(self.dir())) if os.path.isdir(self.dir()) else []:
+            if f.endswith(".json"):
+                self.existing.addItem(f[:-5].replace("-", " "), os.path.join(self.dir(), f))
+        self.existing.currentIndexChanged.connect(self.load_existing)
+        h.addWidget(self.existing, 1)
+        v.addLayout(h)
+        h = QHBoxLayout()
+        self.theme_edit = QLineEdit()
+        self.theme_edit.setPlaceholderText("ör. tarihin çözülemeyen gizemleri · dünyanın en ilginç ülkeleri")
+        h.addWidget(self.theme_edit, 1)
+        self.btn = QPushButton("10 BÖLÜM ÖNER", objectName="primary")
+        self.btn.clicked.connect(self.suggest)
+        h.addWidget(self.btn)
+        v.addLayout(h)
+        self.msg = QLabel("", objectName="status")
+        self.msg.setWordWrap(True)
+        v.addWidget(self.msg)
+        self.list = QListWidget()
+        self.list.itemDoubleClicked.connect(lambda _: self.make())
+        v.addWidget(self.list, 1)
+        bb = QHBoxLayout()
+        go = QPushButton("▶  SEÇİLİ BÖLÜMÜ YAP", objectName="primary")
+        go.clicked.connect(self.make)
+        bb.addWidget(go, 2)
+        more = QPushButton("+5 BÖLÜM DAHA")
+        more.clicked.connect(lambda: self.suggest(more=True))
+        bb.addWidget(more)
+        close = QPushButton("KAPAT")
+        close.clicked.connect(self.reject)
+        bb.addWidget(close)
+        v.addLayout(bb)
+        if self.existing.count() > 1:
+            self.existing.setCurrentIndex(self.existing.count() - 1)
+
+    def dir(self):
+        return os.path.join(self.win.outdir.text(), "Seriler")
+
+    def load_existing(self, *_):
+        p = self.existing.currentData()
+        if not p:
+            self.data, self.path = None, None
+            self.list.clear()
+            return
+        with open(p, encoding="utf-8") as f:
+            self.data = json.load(f)
+        self.path = p
+        self.theme_edit.setText(self.data.get("theme", ""))
+        self.fill()
+
+    def fill(self):
+        self.list.clear()
+        for i, e in enumerate(self.data["episodes"]):
+            mark = "✓ " if e.get("done") else "○ "
+            it = QListWidgetItem(f"{mark}Bölüm {i + 1}: {e['title']}\n     açı: {e.get('angle', '')}  ·  kanca: {e.get('hook', '')}")
+            it.setData(Qt.UserRole, i)
+            self.list.addItem(it)
+        nxt = next((i for i, e in enumerate(self.data["episodes"]) if not e.get("done")), 0)
+        self.list.setCurrentRow(nxt)
+        done = sum(1 for e in self.data["episodes"] if e.get("done"))
+        self.msg.setText(f"{self.data['series']}: {done}/{len(self.data['episodes'])} bölüm yapıldı. "
+                         "Öneri: günde en fazla 1-2 bölüm yükle.")
+
+    def suggest(self, more=False):
+        t = self.theme_edit.text().strip()
+        if not t:
+            self.msg.setText("Önce bir tema yaz.")
+            return
+        self.btn.setEnabled(False)
+        self.msg.setText("Yapay zekâ bölümleri düşünüyor… (bir iki dakika sürebilir)")
+        self._more = bool(more and self.data)
+        self._th = SeriesIdeas(t + (" (önceki bölümler: " + "; ".join(e["title"] for e in self.data["episodes"]) +
+                                    " — bunlardan FARKLI konular öner)" if self._more else ""),
+                               5 if self._more else 10, self.win.lang.value())
+        self._th.done.connect(self.on_ideas)
+        self._th.start()
+
+    def on_ideas(self, data, err):
+        self.btn.setEnabled(True)
+        if not data:
+            self.msg.setText(f"<span style='color:#FF4D1A'>{err}</span>")
+            return
+        if self._more:
+            have = {re.sub(r"\W", "", e["title"].lower()) for e in self.data["episodes"]}
+            self.data["episodes"] += [e for e in data["episodes"] if re.sub(r"\W", "", e["title"].lower()) not in have]
+        else:
+            self.data = data
+            os.makedirs(self.dir(), exist_ok=True)
+            self.path = os.path.join(self.dir(), slugify(data["series"]) + ".json")
+        self.save()
+        self.fill()
+
+    def save(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(self.data, f, ensure_ascii=False, indent=2)
+
+    def make(self):
+        it = self.list.currentItem()
+        if not it or not self.data:
+            return
+        i = it.data(Qt.UserRole)
+        e = self.data["episodes"][i]
+        self.win.current_series = {"name": self.data["series"], "label": f"Bölüm {i + 1}", "index": i,
+                                   "file": self.path, "angle": e.get("angle", ""), "hook": e.get("hook", ""),
+                                   "title": e["title"]}
+        self.win.simple_prompt.setPlainText(e["title"])
+        self.accept()
+        self.win.start_auto()
+
+
+def mark_episode_done(series, video):
+    """Seri dosyasında bölümü yapıldı olarak işaretler."""
+    try:
+        with open(series["file"], encoding="utf-8") as f:
+            data = json.load(f)
+        data["episodes"][series["index"]].update(done=True, video=video)
+        with open(series["file"], "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
 class SettingsDialog(QDialog):
     """Uygulama ayarları: tema, vurgu rengi, açılış efekti, kayıt klasörü."""
 
@@ -391,6 +645,29 @@ class SettingsDialog(QDialog):
         h.addWidget(self.outdir, 1)
         h.addWidget(ob)
         v.addLayout(h)
+        v.addWidget(win._section("HD stok video anahtarları (ücretsiz)"))
+        kh = QLabel("Wikimedia'dan çok daha kaliteli, dikey çekimler de içeren videolar için. Ücretsiz kayıt olup "
+                    "anahtarı buraya yapıştır: <a href='https://www.pexels.com/api/'>pexels.com/api</a> · "
+                    "<a href='https://pixabay.com/api/docs/'>pixabay.com/api/docs</a>", objectName="hint")
+        kh.setWordWrap(True)
+        kh.setOpenExternalLinks(True)
+        v.addWidget(kh)
+        mb = QPushButton("🎵 MÜZİK KLASÖRÜNÜ AÇ")
+        mb.setToolTip("YouTube Ses Kitaplığı'ndan indirdiğin parçaları buraya koy; otomatik müzik yerine kullanılır")
+        mb.clicked.connect(lambda: win.open_path(AU.ensure_library(win.music_dir())))
+        self.pexels = QLineEdit(st.value("pexels_key", ""))
+        self.pexels.setPlaceholderText("Pexels API anahtarı")
+        self.pixabay = QLineEdit(st.value("pixabay_key", ""))
+        self.pixabay.setPlaceholderText("Pixabay API anahtarı")
+        v.addWidget(self.pexels)
+        v.addWidget(self.pixabay)
+        v.addWidget(win._section("Gerçek müzik"))
+        mh = QLabel("Program kendi müziğini üretir. Daha iyisi için YouTube Studio > Ses Kitaplığı'ndan (telif "
+                    "talebi almaz) parça indirip müzik klasörüne koy; her videoda en az kullanılan seçilir.",
+                    objectName="hint")
+        mh.setWordWrap(True)
+        v.addWidget(mh)
+        v.addWidget(mb)
         v.addWidget(win._section("Senaryo yazan yapay zekâ"))
         hint = QLabel("Model seçimi ve kurulum sol paneldeki “Senaryo yazan yapay zekâ” bölümündedir.", objectName="hint")
         hint.setWordWrap(True)
@@ -427,6 +704,9 @@ class SettingsDialog(QDialog):
         st.setValue("app_accent", self.accent.value())
         st.setValue("splash", self.splash.value())
         st.setValue("splash_sound", self.sound.value())
+        st.setValue("pexels_key", self.pexels.text().strip())
+        st.setValue("pixabay_key", self.pixabay.text().strip())
+        apply_stock_keys(st)
         if self.outdir.text().strip():
             self.win.outdir.setText(self.outdir.text().strip())
             st.setValue("outdir", self.outdir.text().strip())
@@ -492,7 +772,8 @@ class Worker(QThread):
                 self.researched.emit(pipeline.research_topic(self.prompt, self.out_dir, self.opts.get("lang", "tr"), cb=cb))
             elif self.mode == "plan":
                 plan = pipeline.write_plan(self.prompt, self.findings, self.out_dir, self.opts.get("lang", "tr"), cb=cb,
-                                           length=self.opts.get("length", "orta"), kind=self.opts.get("kind"))
+                                           length=self.opts.get("length", "orta"), kind=self.opts.get("kind"),
+                                           shorts=self.opts.get("shorts", False))
                 self.planned.emit(plan)
             else:
                 o = self.opts
@@ -502,7 +783,8 @@ class Worker(QThread):
                                            vertical=o.get("vertical", False), square=o.get("square", False),
                                            quality=o.get("quality", "1080"), fps=o.get("fps", 30),
                                            tempo=o.get("tempo", "normal"), accent=o.get("accent"), bg=o.get("bg"),
-                                           sub_opts=o.get("sub_opts"), music_vol=o.get("music_vol", 0.35))
+                                           sub_opts=o.get("sub_opts"), music_vol=o.get("music_vol", 0.35),
+                                           shorts=o.get("shorts", False), review=o.get("review"))
                 self.finished_ok.emit(out)
         except pipeline.Cancelled:
             self.failed.emit("İptal edildi.")
@@ -668,12 +950,6 @@ class MainWindow(QMainWindow):
         self.prompt.setFixedHeight(96)
         self.prompt.setPlainText(self.settings.value("prompt", ""))
         v.addWidget(self.prompt)
-        for ex in EXAMPLES:
-            b = QPushButton("↳ " + ex, objectName="chip")
-            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-            b.setToolTip(ex)
-            b.clicked.connect(lambda _=False, e=ex: self.prompt.setPlainText(e))
-            v.addWidget(b)
 
         v.addWidget(self._section("Hazır stiller"))
         g = QGridLayout()
@@ -702,6 +978,8 @@ class MainWindow(QMainWindow):
 
         default_out = os.path.join(os.path.expanduser("~"), "Videos", "DARKROOM")
         self.outdir = QLineEdit(self.settings.value("outdir", default_out))  # Ayarlar penceresinden değişir
+        self.outdir.textChanged.connect(lambda _: self.set_music_dir())
+        self.set_music_dir()
 
         v.addWidget(self._section("Senaryo yazan yapay zekâ"))
         self.ai_status = QLabel("Kontrol ediliyor…")
@@ -802,6 +1080,10 @@ class MainWindow(QMainWindow):
         top.addWidget(QLabel("▌DARKROOM", objectName="brand"))
         top.addWidget(QLabel("  credit by EC", objectName="brandsub"))
         top.addStretch(1)
+        ser = QPushButton("📚 SERİ PLANLA", objectName="chip")
+        ser.setToolTip("Bir temadan birbirinden farklı bölümler: kanalı seri üretim cezasından korur")
+        ser.clicked.connect(lambda: SeriesDialog(self).exec())
+        top.addWidget(ser)
         adv = QPushButton("⚙ GELİŞMİŞ MOD", objectName="chip")
         adv.setToolTip("Bütün ayarları elle seçmek, senaryoyu düzenlemek için")
         adv.clicked.connect(lambda: self.set_simple(False))
@@ -838,16 +1120,6 @@ class MainWindow(QMainWindow):
             b.setToolTip(kinds.KINDS[b.property("key")]["desc"])
         self._kind_locked = False
         self.kind_sel.buttonClicked.connect(self._on_kind_clicked)
-        ex = QHBoxLayout()
-        for e in ("Shorts için kısa bir video: Kahvenin dünyaya yayılış hikâyesi",
-                  "Osmanlı İmparatorluğu'nun yükselişi, detaylı",
-                  "Avrupa'da enflasyon: Türkiye, Almanya, Fransa"):
-            b = QPushButton("↳ " + e, objectName="chip")
-            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-            b.setToolTip(e)
-            b.clicked.connect(lambda _=False, t=e: self.simple_prompt.setPlainText(t))
-            ex.addWidget(b)
-        v.addLayout(ex)
         self.auto_info = QLabel("", objectName="status")
         self.auto_info.setWordWrap(True)
         v.addWidget(self.auto_info)
@@ -893,6 +1165,9 @@ class MainWindow(QMainWindow):
             return
         if self.busy():
             return
+        ser = getattr(self, "current_series", None)
+        if ser and text != ser.get("title"):  # elle başka bir şey yazıldı: seri bölümü değil
+            self.current_series = None
         opts, why, topic = autoset.infer(text, self.kind_sel.value())
         self.set_options(opts)
         self.prompt.setPlainText(topic)
@@ -1128,8 +1403,10 @@ class MainWindow(QMainWindow):
         left.addStretch(1)
 
         v = self._group("Format ve kalite", right)
-        self._label("ANA VİDEO: 16:9 YATAY (YOUTUBE). AYRICA OLUŞTUR:", v)
-        self.vert = self._segmented([("0", "DİKEY YOK"), ("1", "DİKEY 9:16\nShorts / Reels")], "0", v)
+        self._label("VİDEO BİÇİMİ", v)
+        self.vert = self._segmented([("0", "YATAY 16:9\nYouTube"), ("1", "YATAY + DİKEY\nkopya"),
+                                     ("2", "SHORTS 9:16\ngerçek dikey")], "0", v)
+        self.vert.buttons()[2].setToolTip("Video baştan dikey çizilir: kanca, kelime kelime büyük altyazı, hızlı kurgu")
         self.square = self._segmented([("0", "KARE YOK"), ("1", "KARE 1:1\nInstagram")], "0", v)
         self._label("ÇÖZÜNÜRLÜK", v)
         self.quality = self._segmented([("720", "720p"), ("1080", "1080p"), ("1440", "1440p"), ("2160", "4K")], "1080", v)
@@ -1634,6 +1911,13 @@ class MainWindow(QMainWindow):
         self.music.setVisible(own)
         self.music_btn.setVisible(own)
 
+    def music_dir(self):
+        return os.path.join(self.outdir.text(), "Muzik")
+
+    def set_music_dir(self):
+        """Gerçek müzik klasörü: "Otomatik" müzik seçiliyken buradaki parçalar kullanılır."""
+        os.environ["PV_MUSIC_DIR"] = self.music_dir()
+
     def music_choice(self):
         m = self.music_mode.currentData()
         return self.music.text().strip() if m == "file" else m
@@ -1838,11 +2122,15 @@ class MainWindow(QMainWindow):
         self.sync_findings()
         planner.MODEL = self.model.currentText().strip() or planner.MODEL
         prompt = getattr(self, "research_prompt", None) or self.prompt.toPlainText().strip()
+        ser = getattr(self, "current_series", None)
+        if ser:  # bölümün kendine özgü açısı: seri bölümleri birbirinin kopyası olmasın
+            prompt += (f"\n(Bu video '{ser['name']}' serisinin {ser['label']} bölümü. Bu bölümün anlatım açısı: "
+                       f"{ser.get('angle', '')}. Önerilen kanca: {ser.get('hook', '')})")
         self.log.clear()
         self.tabs.setCurrentWidget(self.tab_preview)
         self.worker = Worker("plan", prompt=prompt, out_dir=self.plan_dir, findings=self.findings,
                              opts={"length": self.length.value(), "lang": self.lang.value(),
-                                   "kind": self.kind_combo.currentData()})
+                                   "kind": self.kind_combo.currentData(), "shorts": self.vert.value() == "2"})
         self._wire(self.worker)
         self.worker.planned.connect(self.on_planned)
         self.set_busy(True)
@@ -1857,7 +2145,8 @@ class MainWindow(QMainWindow):
         style, accent, bg = self.look()
         opts = {"style": style, "accent": accent, "bg": bg, "voice": self.voice.currentData(),
                 "music": self.music_choice(), "music_vol": self.music_vol.value() / 100,
-                "sfx": self.sfx.value() == "1", "vertical": self.vert.value() == "1",
+                "sfx": self.sfx.value() == "1", "vertical": self.vert.value() == "1", "shorts": self.vert.value() == "2",
+                "review": (self.plan or {}).get("review"),
                 "square": self.square.value() == "1", "subtitles": self.subs.value() == "1",
                 "sub_opts": self.sub_opts(), "quality": self.quality.value(), "fps": int(self.fps.value()),
                 "tempo": self.tempo.value(), "lang": self.plan.get("language") or self.lang.value()}
@@ -1888,6 +2177,11 @@ class MainWindow(QMainWindow):
 
     def on_planned(self, plan):
         self.plan = plan
+        ser = getattr(self, "current_series", None)
+        if ser:
+            plan["series"] = {"name": ser["name"], "label": ser["label"]}
+            if ser.get("hook") and plan.get("hooks") is not None and ser["hook"] not in plan["hooks"]:
+                plan["hooks"] = plan["hooks"][:2] + [ser["hook"]]
         self.set_busy(False)
         self.populate_scenes()
         chk = plan.get("check")
@@ -1896,12 +2190,32 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Senaryo hazır: {len(plan.get('scenes', []))} sahne{extra}")
         self.bar.setValue(1000)
         if self.auto_chain:
-            self.start_render()
+            dlg = ReviewDialog(self, plan)  # insan kararı: kanca, yorum, anlatım
+            if dlg.exec() and dlg.result_action == "render":
+                dlg.apply()
+                self.populate_scenes()
+                pipeline.write_log(self.plan_dir, "onay", plan["review"])
+                self.start_render()
+                return
+            self.auto_chain = False
+            if dlg.result_action == "edit":
+                dlg.apply()
+                self.populate_scenes()
+                self.set_simple(False)
+                self.tabs.setCurrentWidget(self.tab_editor)
+                self.status.setText("Senaryoyu düzenleyip “Videoyu oluştur”a bas.")
+            else:
+                self.status.setText("Senaryo hazır, video yapılmadı. Gelişmiş moddan düzenleyip oluşturabilirsin.")
+            self.set_busy(False)
             return
         self.tabs.setCurrentWidget(self.tab_editor)
 
     def on_rendered(self, path):
         self.auto_chain = False
+        ser = getattr(self, "current_series", None)
+        if ser and self.plan and (self.plan.get("series") or {}).get("label") == ser["label"]:
+            mark_episode_done(ser, path)
+            self.current_series = None
         self.set_busy(False)
         self.last_video = path
         self.btn_open.setEnabled(True)
@@ -2133,6 +2447,7 @@ def run_app():
     if os.path.exists(icon):
         app.setWindowIcon(QIcon(icon))
     st = QSettings("DARKROOM", "DARKROOM")
+    apply_stock_keys(st)
     set_app_theme(st.value("app_mode", "koyu"), st.value("app_accent", "turuncu"))
     app.setStyleSheet(app_stylesheet())
     if os.environ.get("PV_NO_SPLASH") or st.value("splash", "1") == "0":
