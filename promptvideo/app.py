@@ -610,6 +610,49 @@ class ImageSetup(QThread):
             self.done.emit(False, str(e))
 
 
+class ImageGen(QThread):
+    """Resim stüdyosu: tarife göre bir ya da birkaç resim çizer, her biri bitince haber verir."""
+    drawn = Signal(str)
+    status = Signal(str)
+    done = Signal(bool, str)
+
+    def __init__(self, text, character, style, fmt, count, seed, out_dir):
+        super().__init__()
+        self.text, self.character, self.style, self.fmt = text, character, style, fmt
+        self.count, self.seed, self.out_dir = count, seed, out_dir
+        self._cancel = threading.Event()
+
+    def run(self):
+        try:
+            if not imagegen.server_up():
+                self.status.emit("Görsel motoru başlatılıyor… (ilk açılış bir iki dakika sürebilir)")
+                if not imagegen.start_server():
+                    self.done.emit(False, "Görsel motoru açılamadı. Kurulu olduğundan emin ol (üstteki şerit).")
+                    return
+            self.status.emit("Tarif çiziciye çevriliyor…")
+            scene = imagegen.to_english(self.text, self.status.emit)
+            char = imagegen.to_english(self.character, self.status.emit) if self.character else ""
+            prompt = imagegen.full_prompt(scene, char, self.style)
+            w, h = imagegen.FORMATS.get(self.fmt, imagegen.FORMATS["yatay"])
+            os.makedirs(self.out_dir, exist_ok=True)
+            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            for i in range(self.count):
+                if self._cancel.is_set():
+                    break
+                self.status.emit(f"Çiziliyor… {i + 1}/{self.count}")
+                path = os.path.join(self.out_dir, f"{stamp}-{slugify(self.text)}-{i + 1}.png")
+                imagegen.generate(prompt, path, w, h, self.seed + i, cancelled=self._cancel.is_set)
+                with open(path + ".json", "w", encoding="utf-8") as f:  # resmin tarifi: "benzerini çiz" için
+                    json.dump({"text": self.text, "character": self.character, "style": self.style, "format": self.fmt,
+                               "seed": self.seed + i, "prompt": prompt}, f, ensure_ascii=False, indent=2)
+                self.drawn.emit(path)
+            self.done.emit(True, "")
+        except Exception as e:
+            self.done.emit(False, str(e))
+        finally:
+            imagegen.release()  # ekran kartı belleği boşalsın
+
+
 # --- Ana pencere -------------------------------------------------------------
 
 class MainWindow(QMainWindow):
@@ -797,6 +840,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_research, "Araştırma")
         self.tabs.addTab(self.tab_editor, "Senaryo")
         self.tabs.addTab(self._build_library_tab(), "Videolarım")
+        self.tab_studio = self._build_studio_tab()
+        self.tabs.addTab(self.tab_studio, "Resim stüdyosu")
         self.tabs.currentChanged.connect(lambda _: self.tabs.currentWidget() is self.tab_style and self.refresh_style_preview())
         w = QWidget()
         l = QVBoxLayout(w)
@@ -821,8 +866,18 @@ class MainWindow(QMainWindow):
         adv = QPushButton("⚙ GELİŞMİŞ MOD", objectName="chip")
         adv.setToolTip("Bütün ayarları elle seçmek, senaryoyu düzenlemek için")
         adv.clicked.connect(lambda: self.set_simple(False))
+        self.btn_studio = QPushButton("🎨 RESİM STÜDYOSU", objectName="chip")
+        self.btn_studio.setToolTip("Ekran kartınla resim çiz: karakter, sahne, kapak")
+        self.btn_studio.clicked.connect(self.toggle_studio)
+        top.addWidget(self.btn_studio)
         top.addWidget(adv)
         v.addLayout(top)
+        self.simple_video = QWidget()  # video kutusu ve türler; resim stüdyosunda gizlenir
+        vv = QVBoxLayout(self.simple_video)
+        vv.setContentsMargins(0, 0, 0, 0)
+        vv.setSpacing(8)
+        v.addWidget(self.simple_video)
+        v = vv
         row = QHBoxLayout()
         self.simple_prompt = QPlainTextEdit()
         self.simple_prompt.setPlaceholderText(
@@ -861,6 +916,15 @@ class MainWindow(QMainWindow):
         self._auto_timer.setSingleShot(True)
         self._auto_timer.timeout.connect(self.update_auto_info)
         return self.simple_panel
+
+    def toggle_studio(self):
+        """Basit modda video ekranı ile resim stüdyosu arasında geçiş."""
+        on = self.tabs.currentWidget() is not self.tab_studio
+        self.tabs.setCurrentWidget(self.tab_studio if on else self.tab_preview)
+        self.simple_video.setVisible(not on)
+        self.btn_studio.setText("◀ VİDEO" if on else "🎨 RESİM STÜDYOSU")
+        if on:
+            self.check_image_engine("hikaye")
 
     def _on_kind_clicked(self, *_):
         self._kind_locked = True  # kullanıcı seçti: prompt artık türü değiştirmez
@@ -1538,6 +1602,199 @@ class MainWindow(QMainWindow):
         h.addStretch(1)
         v.addLayout(h)
         return w
+
+    # ---- resim stüdyosu ----
+    def _build_studio_tab(self):
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 16, 0, 0)
+        h.setSpacing(18)
+        left = QWidget()
+        left.setFixedWidth(400)
+        v = QVBoxLayout(left)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(8)
+        v.addWidget(QLabel("NE ÇİZİLSİN?", objectName="formlabel"))
+        self.st_text = QPlainTextEdit()
+        self.st_text.setPlaceholderText("ör. gece yağmurlu bir şehirde neon tabelaların altında yürüyen kedi, "
+                                        "arkadan geniş çekim")
+        self.st_text.setFixedHeight(110)
+        v.addWidget(self.st_text)
+        v.addWidget(QLabel("KARAKTER (HER RESİMDE AYNI KALIR)", objectName="formlabel"))
+        self.st_char = QLineEdit()
+        self.st_char.setPlaceholderText("ör. kırmızı atkılı, yeşil gözlü küçük turuncu kedi (boş bırakılabilir)")
+        v.addWidget(self.st_char)
+        v.addWidget(QLabel("TARZ", objectName="formlabel"))
+        self.st_style = self._segmented([(k, n.upper()) for k, n in imagegen.STYLE_NAMES.items()], "cartoon", v)
+        row1 = v.itemAt(v.count() - 1).layout()  # 5 düğme dar sütuna sığmaz: iki satıra böl
+        row2 = QHBoxLayout()
+        row2.setSpacing(6)
+        for b in self.st_style.buttons()[3:]:
+            row1.removeWidget(b)
+            row2.addWidget(b)
+        v.addLayout(row2)
+        v.addWidget(QLabel("FORMAT", objectName="formlabel"))
+        self.st_fmt = self._segmented([("yatay", "YATAY 16:9"), ("dikey", "DİKEY 9:16"), ("kare", "KARE 1:1")],
+                                      "yatay", v)
+        v.addWidget(QLabel("KAÇ RESİM", objectName="formlabel"))
+        self.st_count = self._segmented([("1", "1"), ("2", "2"), ("4", "4")], "2", v)
+        self.st_lock = QCheckBox("Tutarlı karakter ve renkler (sabit tohum)")
+        self.st_lock.setChecked(True)
+        v.addWidget(self.st_lock)
+        row = QHBoxLayout()
+        self.btn_draw = QPushButton("🎨  ÇİZ", objectName="primary")
+        self.btn_draw.setMinimumHeight(52)
+        self.btn_draw.clicked.connect(self.start_draw)
+        row.addWidget(self.btn_draw, 1)
+        self.btn_draw_stop = QPushButton("■ DURDUR", objectName="danger")
+        self.btn_draw_stop.clicked.connect(lambda: self._imgen and self._imgen._cancel.set())
+        self.btn_draw_stop.hide()
+        row.addWidget(self.btn_draw_stop)
+        v.addLayout(row)
+        self.st_status = QLabel("", objectName="status")
+        self.st_status.setWordWrap(True)
+        v.addWidget(self.st_status)
+        v.addStretch(1)
+        h.addWidget(left)
+
+        right = QVBoxLayout()
+        right.setSpacing(8)
+        self.st_big = QLabel("Çizdiğin resimler burada görünür.\nResimler senin ekran kartında çizilir; "
+                             "internete gönderilmez.", alignment=Qt.AlignCenter, objectName="status")
+        self.st_big.setMinimumHeight(380)
+        self.st_big.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+        right.addWidget(self.st_big, 3)
+        self.st_gallery = QListWidget()
+        self.st_gallery.setViewMode(QListWidget.IconMode)
+        self.st_gallery.setIconSize(QSize(176, 99))
+        self.st_gallery.setResizeMode(QListWidget.Adjust)
+        self.st_gallery.setMovement(QListWidget.Static)
+        self.st_gallery.setFixedHeight(150)
+        self.st_gallery.setFlow(QListWidget.LeftToRight)
+        self.st_gallery.setWrapping(False)
+        self.st_gallery.currentItemChanged.connect(lambda it, _: self.show_studio_image(it))
+        self.st_gallery.itemDoubleClicked.connect(lambda it: self.open_path(it.data(Qt.UserRole)))
+        right.addWidget(self.st_gallery)
+        bh = QHBoxLayout()
+        for label, fn, tip in (("BENZERİNİ ÇİZ", self.draw_similar, "Aynı tarifle yeni çeşitler"),
+                               ("TARİFİ GERİ YÜKLE", self.reuse_recipe, "Bu resmin tarifini soldaki kutulara koyar"),
+                               ("AÇ", lambda: self._st_cur() and self.open_path(self._st_cur()), ""),
+                               ("KLASÖR", lambda: self.open_path(self.studio_dir()), ""),
+                               ("SİL", self.delete_studio_image, "")):
+            b = QPushButton(label)
+            b.setToolTip(tip)
+            b.clicked.connect(fn)
+            bh.addWidget(b)
+        bh.addStretch(1)
+        right.addLayout(bh)
+        h.addLayout(right, 1)
+        self._imgen = None
+        QTimer.singleShot(0, self.refresh_studio)
+        return w
+
+    def studio_dir(self):
+        return os.path.join(self.outdir.text(), "Resimler")
+
+    def _st_cur(self):
+        it = self.st_gallery.currentItem()
+        return it.data(Qt.UserRole) if it else None
+
+    def _st_item(self, path):
+        from PIL import Image
+        im = Image.open(path)
+        im.thumbnail((176, 176))
+        it = QListWidgetItem(QIcon(pil_to_pixmap(im)), "")
+        it.setData(Qt.UserRole, path)
+        it.setToolTip(os.path.basename(path))
+        return it
+
+    def refresh_studio(self):
+        self.st_gallery.clear()
+        d = self.studio_dir()
+        if not os.path.isdir(d):
+            return
+        for f in sorted((x for x in os.listdir(d) if x.endswith(".png")), reverse=True)[:120]:
+            try:
+                self.st_gallery.addItem(self._st_item(os.path.join(d, f)))
+            except Exception:
+                pass
+        if self.st_gallery.count():
+            self.st_gallery.setCurrentRow(0)
+
+    def show_studio_image(self, it):
+        if not it:
+            return
+        pm = QPixmap(it.data(Qt.UserRole))
+        self.st_big.setPixmap(pm.scaled(self.st_big.width(), self.st_big.height(), Qt.KeepAspectRatio,
+                                        Qt.SmoothTransformation))
+
+    def start_draw(self, seed=None):
+        text = self.st_text.toPlainText().strip()
+        if not text:
+            QMessageBox.information(self, APP_NAME, "Önce ne çizileceğini yaz.")
+            return
+        if self._imgen and self._imgen.isRunning():
+            return
+        if not imagegen.ready():
+            self.check_image_engine("hikaye")
+            QMessageBox.information(self, APP_NAME, "Resim çizmek için önce görsel motoru kurulmalı (üstteki şerit).")
+            return
+        import random
+        if seed is None:
+            seed = 1234 if self.st_lock.isChecked() else random.randint(1, 2 ** 31)
+        self._imgen = ImageGen(text, self.st_char.text().strip(), self.st_style.value(), self.st_fmt.value(),
+                               int(self.st_count.value()), seed, self.studio_dir())
+        self._imgen.drawn.connect(self.on_drawn)
+        self._imgen.status.connect(self.st_status.setText)
+        self._imgen.done.connect(self.on_draw_done)
+        self.btn_draw.setEnabled(False)
+        self.btn_draw_stop.show()
+        self._imgen.start()
+
+    def on_drawn(self, path):
+        it = self._st_item(path)
+        self.st_gallery.insertItem(0, it)
+        self.st_gallery.setCurrentItem(it)
+
+    def on_draw_done(self, ok, why):
+        self.btn_draw.setEnabled(True)
+        self.btn_draw_stop.hide()
+        self.st_status.setText("Hazır ✓  Beğenmediysen BENZERİNİ ÇİZ ile yeni çeşitler al." if ok else f"Çizilemedi: {why}")
+
+    def _recipe(self):
+        p = self._st_cur()
+        try:
+            with open(p + ".json", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def reuse_recipe(self):
+        r = self._recipe()
+        if not r:
+            return
+        self.st_text.setPlainText(r.get("text", ""))
+        self.st_char.setText(r.get("character", ""))
+        self.st_style.set_value(r.get("style", "cartoon"))
+        self.st_fmt.set_value(r.get("format", "yatay"))
+
+    def draw_similar(self):
+        import random
+        if self._recipe():
+            self.reuse_recipe()
+        self.start_draw(random.randint(1, 2 ** 31))
+
+    def delete_studio_image(self):
+        p = self._st_cur()
+        if not p or QMessageBox.question(self, APP_NAME, "Bu resim silinsin mi?") != QMessageBox.Yes:
+            return
+        for f in (p, p + ".json"):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        self.st_gallery.takeItem(self.st_gallery.currentRow())
+        self.st_big.setText("Resim silindi.")
 
     # ---- ayarlar ve küçük yardımcılar ----
     def _segmented(self, options, current, v, owner=None):

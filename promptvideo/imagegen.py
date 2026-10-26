@@ -191,6 +191,35 @@ def _workflow(prompt, width, height, seed):
     }
 
 
+# Resim stüdyosu biçimleri: SDXL'in iyi çizdiği boyutlar (genişlik, yükseklik)
+FORMATS = {"yatay": (1344, 768), "dikey": (768, 1344), "kare": (1024, 1024)}
+STYLE_NAMES = {"cartoon": "3D çizgi film", "anime": "Anime", "comic": "Çizgi roman", "realistic": "Gerçekçi",
+               "storybook": "Masal kitabı"}
+
+
+def to_english(text, log=print):
+    """Türkçe tarifi çizim modeli için İngilizce isteme çevirir (Ollama varsa); yoksa olduğu gibi döner."""
+    import re as _re
+    if not text.strip() or not _re.search(r"[çğıöşüÇĞİÖŞÜ]|\b(ve|bir|ile|olan|gibi)\b", text):
+        return text
+    try:
+        from . import planner as P
+        ok, _ = P.ollama_available()
+        if not ok:
+            return text
+        r = requests.post(f"{P.OLLAMA}/api/chat", timeout=300, json={
+            "model": P.MODEL, "stream": False, "think": False, "options": {"temperature": 0.2},
+            "messages": [{"role": "system", "content": "Translate the user's picture description into a concise English "
+                                                       "image-generation prompt (comma separated visual details). "
+                                                       "Reply with the prompt only."},
+                         {"role": "user", "content": text}]})
+        out = _re.sub(r"<think>.*?</think>", "", r.json()["message"]["content"], flags=_re.S).strip().strip('"')
+        return out or text
+    except Exception as e:
+        log(f"  [çeviri] {e}")
+        return text
+
+
 def full_prompt(scene_prompt, character="", style="cartoon"):
     # önce konu, sonra tarz: istemin başındaki kelimeler resimde daha güçlü etki eder
     parts = [character, scene_prompt, STYLES.get(style, STYLES["cartoon"])]
